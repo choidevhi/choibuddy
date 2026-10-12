@@ -304,17 +304,19 @@ export async function fetchProjects(connection: Connection): Promise<Project[]> 
   }
 }
 
-export type OpenResult = { ok: true; terminal: string } | { ok: false; error: string }
+// `sessionId`: the session that opened, when ChoiBuddy runs it itself (Codex).
+export type OpenResult = { ok: true; terminal: string; sessionId: string | null } | { ok: false; error: string }
 
 // The coding agents a new session can start.
 export type SessionAgent = 'claude' | 'codex'
 
-export async function openNewSession(connection: Connection, cwd: string, prompt: string, agent: SessionAgent): Promise<OpenResult> {
+// `window`: in a terminal window on the PC; Codex otherwise runs in ChoiBuddy.
+export async function openNewSession(connection: Connection, cwd: string, prompt: string, agent: SessionAgent, window: boolean): Promise<OpenResult> {
   try {
-    const res = await fetch(`${connection.baseUrl}/api/session/new`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ cwd, prompt, agent }) })
-    const body: { terminal?: string; error?: string } = await res.json()
+    const res = await fetch(`${connection.baseUrl}/api/session/new`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ cwd, prompt, agent, window }) })
+    const body: { terminal?: string; error?: string; sessionId?: string } = await res.json()
 
-    return res.ok ? { ok: true, terminal: body.terminal ?? '' } : { ok: false, error: body.error ?? String(res.status) }
+    return res.ok ? { ok: true, terminal: body.terminal ?? '', sessionId: body.sessionId ?? null } : { ok: false, error: body.error ?? String(res.status) }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -370,6 +372,22 @@ export async function openTerminal(connection: Connection, cwd: string): Promise
 
 // `trusted`: whether Codex runs the hooks (null: not connected, or Codex
 // could not be asked). `cli`: whether the `codex` command is there.
+// A model Codex offers, with the efforts it takes.
+export type CodexModelChoice = { id: string; name: string; efforts: string[] }
+
+export async function fetchCodexModels(connection: Connection): Promise<CodexModelChoice[]> {
+  const res = await fetch(`${connection.baseUrl}/api/codex/models`, { headers: authHeaders(connection) }).catch(() => null)
+  const body: { models?: Array<{ id?: string; name?: string; efforts?: string[] }> } | null = res?.ok === true ? await res.json().catch(() => null) : null
+
+  return (body?.models ?? []).flatMap(model => (model.id === undefined ? [] : [{ id: model.id, name: model.name ?? model.id, efforts: model.efforts ?? [] }]))
+}
+
+// The model and effort the next turn of a Codex session ChoiBuddy runs
+// uses; an empty one stays as it is.
+export async function setCodexSettings(connection: Connection, sessionId: string, model: string, effort: string): Promise<boolean> {
+  return (await post(connection, '/api/codex/settings', { sessionId, model, effort }))?.ok === true
+}
+
 export type CodexState = { installed: boolean; connected: boolean; trusted: boolean | null; cli: boolean }
 
 type CodexBody = { installed?: boolean; connected?: boolean; trusted?: boolean | null; cli?: boolean }

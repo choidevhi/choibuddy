@@ -27,7 +27,7 @@ export type CodexReading = {
 // A file read in one go at most; a longer one is read over several calls.
 const MAX_READ = 16 * 1024 * 1024
 
-function emptyReading(): CodexReading {
+export function emptyReading(): CodexReading {
   return { model: null, effort: null, contextTokens: null, contextWindow: null, inputTokens: null, cachedTokens: null, outputTokens: null, windows: [], pictures: [] }
 }
 

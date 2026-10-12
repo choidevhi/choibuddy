@@ -15,6 +15,7 @@ fun Context.localized(): Context {
 class ResourcePhrases(private val context: Context) : Phrases {
     override val permissionRequest get() = context.getString(R.string.notice_permission)
     override val claudeAsks get() = context.getString(R.string.notice_question)
+    override val codexAsks get() = context.getString(R.string.notice_question_codex)
     override val planApproval get() = context.getString(R.string.notice_plan)
     override val finished get() = context.getString(R.string.notice_finished)
     override val stoppedOnError get() = context.getString(R.string.notice_error)
@@ -26,6 +27,7 @@ class ResourcePhrases(private val context: Context) : Phrases {
     override val readFile get() = context.getString(R.string.tool_read_file)
     override val openWebPage get() = context.getString(R.string.tool_open_web)
     override val mcp get() = context.getString(R.string.tool_mcp)
+    override val moreAccess get() = context.getString(R.string.tool_more_access)
 
     override fun useTool(tool: String) = context.getString(R.string.tool_use, tool)
 }

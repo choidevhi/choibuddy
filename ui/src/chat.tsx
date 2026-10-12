@@ -811,7 +811,7 @@ function ConversationPane(props: PaneProps) {
           </div>
         ) : missing ? (
           <div className="empty">
-            <div className="empty-sub">{live?.agent === 'codex' && live.canPrompt ? t('chat.codexWaiting') : t('chat.noTranscript')}</div>
+            <div className="empty-sub">{live?.managed === true ? t('chat.codexReady') : live?.agent === 'codex' && live.canPrompt ? t('chat.codexWaiting') : t('chat.noTranscript')}</div>
           </div>
         ) : shown === null ? (
           <div className="empty">
@@ -819,6 +819,12 @@ function ConversationPane(props: PaneProps) {
           </div>
         ) : (
           <>
+            {/* Codex ChoiBuddy runs, before its first message. */}
+            {live?.managed === true && shown.total === 0 && outbox.length === 0 && (
+              <div className="empty">
+                <div className="empty-sub">{t('chat.codexReady')}</div>
+              </div>
+            )}
             {shown.start > 0 && (
               <button
                 type="button"

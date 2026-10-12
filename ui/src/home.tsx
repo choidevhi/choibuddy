@@ -6,7 +6,7 @@ import { Buddy, type Look, type Tone } from './buddy.tsx'
 import { type CommandsFn, Composer, type UploadFn } from './chat.tsx'
 import { ago, duration, useI18n } from './i18n.ts'
 import { BanIcon, CheckCircleIcon, KindIcon, PlusIcon, SpinnerIcon, XCircleIcon } from './icons.tsx'
-import { CodexModel, ModelControl, modelLabel } from './model.tsx'
+import { CodexModel, CodexModelControl, ModelControl, modelLabel } from './model.tsx'
 import { LiveCodeView, LiveReplyView, MessageView, PreviewView } from './preview.tsx'
 import { UsageStrip } from './usage.tsx'
 
@@ -176,7 +176,7 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
     !session.steps.some(step => step.id === stream.toolUseId)
       ? stream
       : null
-  // Claude writing its answer (no tool yet): shown as it comes, word by word.
+  // The agent writing its answer (no tool yet): shown as it comes, word by word.
   const replying =
     writing === null && stream !== null && stream.toolUseId === null && busy && now - stream.at < LIVE_MS && stream.text.trim() !== '' ? stream : null
   // Codex names its model in its hooks (as it is); Claude's reads as "Opus 5.5".
@@ -232,7 +232,7 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
         {writing !== null && agent === null && selectedId === null ? (
           <LiveCodeView stream={writing} />
         ) : replying !== null && agent === null && selectedId === null ? (
-          <LiveReplyView stream={replying} />
+          <LiveReplyView stream={replying} title={t(session?.agent === 'codex' ? 'home.replyCodex' : 'home.reply')} />
         ) : agent !== null && session !== null ? (
           agentStep !== null && agentStep.preview !== null && (agent.status === 'running' || agent.message === null) ? (
             <PreviewView preview={agentStep.preview} cwd={session.cwd} running={agentStep.status === 'running'} />
@@ -267,7 +267,9 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
         usage={session?.usage ?? null}
         limits={limits}
         now={now}
-        lead={session === null ? null : session.agent === 'codex' ? <CodexModel session={session} /> : <ModelControl session={session} onSend={onSend} />}
+        lead={
+          session === null ? null : session.agent !== 'codex' ? <ModelControl session={session} onSend={onSend} /> : session.managed ? <CodexModelControl session={session} /> : <CodexModel session={session} />
+        }
       />
     </div>
   )

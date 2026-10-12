@@ -27,6 +27,7 @@
 
     <string name="notice_permission">Permission request</string>
     <string name="notice_question">Claude asks</string>
+    <string name="notice_question_codex">Codex asks</string>
     <string name="notice_plan">Plan approval</string>
     <string name="notice_finished">Finished</string>
     <string name="notice_error">Stopped on an error</string>
@@ -40,6 +41,7 @@
     <string name="tool_open_web">Open web page</string>
     <string name="tool_mcp" translatable="false">MCP</string>
     <string name="tool_use">Use %1$s</string>
+    <string name="tool_more_access">Allow more access</string>
 
     <string name="toast_invalid_pairing">This isn\'t a valid pairing code</string>
     <string name="toast_scanner_unavailable">Can\'t open the QR scanner</string>

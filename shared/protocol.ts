@@ -181,9 +181,10 @@ export type HistoryEntry = {
 
 export type SessionStatus = 'thinking' | 'working' | 'waiting' | 'done' | 'idle' | 'error' | 'ended'
 
-// Which coding agent runs the session. Codex reports through its hooks only:
-// no live text or usage, and prompts only when it runs in one of the app's
-// terminals (typed in there).
+// Which coding agent runs the session. Codex that ChoiBuddy runs (`managed`)
+// talks over its app-server like a Claude session; Codex started elsewhere
+// reports through its hooks and its record, and takes prompts only when it
+// runs in one of the app's terminals (typed in there).
 export type AgentKind = 'claude' | 'codex'
 
 export type Session = {
@@ -212,7 +213,8 @@ export type Session = {
   // Slash commands sent from the widget or the phone, with what they printed.
   commandLog: CommandResult[]
   // True once the mod listed the session's slash commands, so "/name" sent
-  // from a device runs as a command instead of reaching Claude as text.
+  // from a device runs as a command instead of reaching Claude as text;
+  // always for Codex ChoiBuddy runs (its own /compact and /review).
   canCommand: boolean
   // The session runs an older companion mod than the one installed on its
   // PC; /reload-plugins brings it up to date.
@@ -220,6 +222,9 @@ export type Session = {
   // True when the session's mod can stop its running turn from here, as Esc
   // does in the terminal (mod 0.5.3 and later).
   canStop: boolean
+  // A Codex session ChoiBuddy runs itself: prompts, stop, model and effort
+  // from here.
+  managed: boolean
 }
 
 // How a prompt meets a turn that is still running: steer (the turn stops once
@@ -286,6 +291,8 @@ export type Pending = {
   id: string
   sessionId: string
   sessionName: string
+  // Who asks: Claude Code, or Codex.
+  agent: AgentKind
   kind: PendingKind
   tool: string
   // What is being asked about, without any wording around it (a command, a
@@ -389,6 +396,8 @@ export type Alert = {
   text: string
   pendingId: string | null
   pendingKind: PendingKind | null
+  // The session's agent, so a question reads "Codex asks" where it is Codex.
+  agent: AgentKind
   at: number
 }
 

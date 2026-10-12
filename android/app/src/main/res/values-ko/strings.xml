@@ -23,6 +23,7 @@
 
     <string name="notice_permission">권한 요청</string>
     <string name="notice_question">Claude의 질문</string>
+    <string name="notice_question_codex">Codex의 질문</string>
     <string name="notice_plan">계획 승인</string>
     <string name="notice_finished">작업 끝</string>
     <string name="notice_error">오류로 멈춤</string>
@@ -35,6 +36,7 @@
     <string name="tool_read_file">파일 읽기</string>
     <string name="tool_open_web">웹 페이지 열기</string>
     <string name="tool_use">%1$s 사용</string>
+    <string name="tool_more_access">권한 넓히기</string>
 
     <string name="toast_invalid_pairing">올바른 연결 코드가 아니에요</string>
     <string name="toast_scanner_unavailable">QR 스캐너를 열 수 없어요</string>

@@ -18,10 +18,15 @@ type SheetProps = {
   onLater: () => void
 }
 
-export const KIND_LABEL: Record<Pending['kind'], MessageKey> = {
+const KIND_LABEL: Record<Pending['kind'], MessageKey> = {
   permission: 'pending.permission',
   question: 'pending.question',
   plan: 'pending.plan',
+}
+
+// What kind of request it is, naming who asks a question.
+export function kindLabel(pending: Pending): MessageKey {
+  return pending.kind === 'question' && pending.agent === 'codex' ? 'pending.questionCodex' : KIND_LABEL[pending.kind]
 }
 
 function actionKey(tool: string): MessageKey | null {
@@ -41,6 +46,9 @@ function actionKey(tool: string): MessageKey | null {
     case 'WebFetch':
     case 'WebSearch':
       return 'pending.web'
+    // Codex asking for more than its sandbox allows.
+    case 'Permissions':
+      return 'pending.permissions'
     default:
       return null
   }
@@ -153,13 +161,13 @@ export function PendingSheet({ pending, count, cwd, tone, onDecide, onLater }: S
 
   return (
     <div className="sheet-backdrop">
-      <div className={`sheet sheet--${pending.kind}`} role="dialog" aria-modal="true" aria-label={t(KIND_LABEL[pending.kind])}>
+      <div className={`sheet sheet--${pending.kind}`} role="dialog" aria-modal="true" aria-label={t(kindLabel(pending))}>
         <header className="sheet-head">
           <Buddy pose={pending.kind === 'question' ? 'question' : pending.kind === 'plan' ? 'plan' : 'warning'} mood="alert" tone={tone} />
           <div className="sheet-heading">
             <div className="sheet-kicker">
               <ShieldIcon size={13} />
-              {t(KIND_LABEL[pending.kind])} · {pending.sessionName}
+              {t(kindLabel(pending))} · {pending.sessionName}
               {count > 1 && <span className="pill">+{count - 1}</span>}
             </div>
             <div className="sheet-title">{pending.kind === 'question' ? t('pending.pickAnswer') : <PendingHeadline pending={pending} />}</div>

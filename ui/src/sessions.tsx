@@ -350,10 +350,15 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
     const terminalItem: MenuEntry = { label: t('menu.terminal'), onSelect: () => terminal(entry.pcKey, entry.cwd) }
 
     if (entry.live) {
-      const canEnd = sessions.find(session => session.id === entry.sessionId)?.canPrompt === true
-      const reloadItem: MenuEntry = { label: t('menu.reload'), disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => void reloadSession(entry) }
+      const live = sessions.find(session => session.id === entry.sessionId)
+      const canEnd = live?.canPrompt === true
+      const items: Array<MenuEntry | null> = [renameItem, terminalItem]
 
-      return [renameItem, terminalItem, reloadItem, null, { label: t('menu.end'), danger: true, disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => setAsking({ kind: 'end', entry }) }]
+      // Codex has no plugins of ChoiBuddy's to reload.
+      if (live?.agent !== 'codex') items.push({ label: t('menu.reload'), disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => void reloadSession(entry) })
+      items.push(null, { label: t('menu.end'), danger: true, disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => setAsking({ kind: 'end', entry }) })
+
+      return items
     }
 
     const ended = groupsOf(entries, entry.pcKey).ended

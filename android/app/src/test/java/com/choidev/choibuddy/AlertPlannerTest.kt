@@ -8,6 +8,7 @@ import org.junit.Test
 private object EnglishPhrases : Phrases {
     override val permissionRequest = "Permission request"
     override val claudeAsks = "Claude asks"
+    override val codexAsks = "Codex asks"
     override val planApproval = "Plan approval"
     override val finished = "Finished"
     override val stoppedOnError = "Stopped on an error"
@@ -19,6 +20,7 @@ private object EnglishPhrases : Phrases {
     override val readFile = "Read file"
     override val openWebPage = "Open web page"
     override val mcp = "MCP"
+    override val moreAccess = "Allow more access"
 
     override fun useTool(tool: String) = "Use $tool"
 }
@@ -89,6 +91,15 @@ class AlertPlannerTest {
 
         assertEquals(Notice.Pending("q1", "web · Claude asks", "Which branch?", emptyList()), withText)
         assertEquals(Notice.Pending("q1", "web · Claude asks", "Pick an answer", emptyList()), empty)
+    }
+
+    @Test
+    fun codexQuestionsAndPermissionsSayWhatTheyAre() {
+        val question = plan(Alert(AlertType.PENDING, "s1", "web", "Which color?", "q1", PendingKind.QUESTION, codex = true))
+        val access = AlertPlanner.forItem(PendingItem("p1", "web", PendingKind.PERMISSION, "Permissions", "to fetch the docs — network", codex = true), null, EnglishPhrases)
+
+        assertEquals(Notice.Pending("q1", "web · Codex asks", "Which color?", emptyList()), question)
+        assertEquals(Notice.Pending("p1", "web · Permission request", "Allow more access · to fetch the docs — network", allowDeny), access)
     }
 
     @Test

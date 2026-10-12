@@ -39,6 +39,7 @@ import { hasBrowser, platform, readPref, windowsShell } from './platform.ts'
 import { ON_OFF, usePref } from './prefs.ts'
 import { playChime } from './sound.ts'
 import { useStopRequests } from './stop.ts'
+import { useChatRequests } from './go.ts'
 
 type Tab = 'home' | 'chat' | 'gallery' | 'browser' | 'terminal' | 'docs' | 'connect'
 
@@ -390,6 +391,12 @@ export function App() {
   const needsSetup = loaded && sources.length === 0
   const autoAccept = feeds.some(feed => (feed.snapshot?.server.autoAcceptUntil ?? 0) > now)
   const activeTab: Tab = needsSetup && platform === 'android' ? 'connect' : tab
+
+  // A session that just opened in ChoiBuddy (Codex): its chat comes up.
+  useChatRequests(sessionId => {
+    setChatId(sessionId)
+    openTab('chat')
+  })
 
   // A terminal asked for elsewhere (session list, menu, new session) opens in the terminal tab.
   const [termRequest, setTermRequest] = useState<(TermRequest & { at: number }) | null>(null)

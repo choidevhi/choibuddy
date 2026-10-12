@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import type { Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
+import { showToast } from './confirm.tsx'
 import { type MessageKey, type Translate, useI18n } from './i18n.ts'
+import { type CodexModelChoice, ConnectionContext, fetchCodexModels, setCodexSettings } from './live.ts'
 
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'] as const
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -54,6 +56,64 @@ export function CodexModel({ session }: { session: Session }) {
         <span className="model-chip-name">{model ?? 'Codex'}</span>
         {effort !== null && <span className="model-chip-effort">{effortLabel(t, effort)}</span>}
       </span>
+    </div>
+  )
+}
+
+// A Codex session ChoiBuddy runs: its model and effort from Codex's own
+// list; the next turn runs with them.
+export function CodexModelControl({ session }: { session: Session }) {
+  const { t } = useI18n()
+  const connection = useContext(ConnectionContext)
+  const [open, setOpen] = useState(false)
+  const [models, setModels] = useState<CodexModelChoice[]>([])
+  const model = session.usage?.model ?? null
+  const effort = session.usage?.effort ?? null
+  const current = models.find(item => item.id === model) ?? null
+
+  useBackLayer(open, () => setOpen(false))
+
+  useEffect(() => {
+    if (open && connection !== null && models.length === 0) void fetchCodexModels(connection).then(setModels)
+  }, [open, connection?.baseUrl])
+
+  const pick = (nextModel: string, nextEffort: string): void => {
+    setOpen(false)
+    if (connection !== null) void setCodexSettings(connection, session.id, nextModel, nextEffort).then(ok => (ok ? undefined : showToast(t('chat.actionFailed'))))
+  }
+
+  return (
+    <div className="model-control">
+      <button type="button" className="model-chip" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open}>
+        <span className="model-chip-name">{model ?? 'Codex'}</span>
+        {effort !== null && <span className="model-chip-effort">{effortLabel(t, effort)}</span>}
+        <span className="picker-caret">▾</span>
+      </button>
+      {open && (
+        <div className="model-menu" role="menu">
+          <div className="model-menu-label">{t('model.title')}</div>
+          <div className="model-menu-row">
+            {models.length === 0 && <span className="model-menu-note">{t('chat.loading')}</span>}
+            {models.map(item => (
+              <button type="button" role="menuitem" key={item.id} className={`model-option ${model === item.id ? 'on' : ''}`} onClick={() => pick(item.id, '')}>
+                {item.name}
+              </button>
+            ))}
+          </div>
+          {current !== null && current.efforts.length > 0 && (
+            <>
+              <div className="model-menu-label">{t('model.effort')}</div>
+              <div className="model-menu-row">
+                {current.efforts.map(level => (
+                  <button type="button" role="menuitem" key={level} className={`model-option ${effort === level ? 'on' : ''}`} onClick={() => pick('', level)}>
+                    {effortLabel(t, level)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

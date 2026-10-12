@@ -9,7 +9,7 @@ import { I18nContext, translator, type Translate } from './i18n.ts'
 import { CheckIcon, XIcon } from './icons.tsx'
 import { sendDecision } from './live.ts'
 import { effortLabel, modelLabel } from './model.tsx'
-import { KIND_LABEL, PendingHeadline } from './pending.tsx'
+import { kindLabel, PendingHeadline } from './pending.tsx'
 import { type Connection, readPref, windowsShell } from './platform.ts'
 import { ON_OFF, usePref } from './prefs.ts'
 import { playChime } from './sound.ts'
@@ -62,7 +62,7 @@ function PendingBubble({ pending, more, connection, t }: { pending: Pending; mor
   return (
     <div className={`fb fb--pending fb--${pending.kind}`}>
       <div className="fb-kicker">
-        {t(KIND_LABEL[pending.kind])} · {pending.sessionName}
+        {t(kindLabel(pending))} · {pending.sessionName}
         {more > 0 && <span className="fb-more">{t('float.more', { n: more })}</span>}
       </div>
       <div className="fb-text">

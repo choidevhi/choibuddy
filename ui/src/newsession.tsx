@@ -7,6 +7,7 @@ import { useI18n } from './i18n.ts'
 import { type CodexState, fetchCodex, fetchProjects, fetchTerms, openNewSession, type SessionAgent, type TermState } from './live.ts'
 import { Picker } from './picker.tsx'
 import { isMac } from './platform.ts'
+import { openChat } from './go.ts'
 import { openTerminalTab } from './terminal.tsx'
 
 type Props = {
@@ -65,9 +66,12 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
   const hasCodex = codex !== null && (codex.installed || codex.cli)
   const chosen: SessionAgent = hasCodex ? agent : 'claude'
   const canApp = terms !== null && terms.available && terms.allowed
-  const inApp = canApp && !pcWindow
+  // Codex runs in ChoiBuddy itself unless a window is asked for; Claude
+  // opens in the app's terminal when this device may use it.
+  const codexHere = chosen === 'codex' && !pcWindow
+  const inApp = chosen === 'claude' && canApp && !pcWindow
   // A window on the PC cannot hand Codex its first prompt.
-  const promptOff = chosen === 'codex' && !inApp
+  const promptOff = chosen === 'codex' && pcWindow
   const cwd = folder === CUSTOM ? custom.trim() : folder
   // A Mac's folders start with /, a Windows PC's with a drive.
   const posixPaths = projects[0] === undefined ? isMac : projects[0].cwd.startsWith('/')
@@ -84,11 +88,24 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
 
     setBusy(true)
 
-    const result = await openNewSession(feed.connection, cwd, promptOff ? '' : prompt.trim(), chosen)
+    const result = await openNewSession(feed.connection, cwd, promptOff ? '' : prompt.trim(), chosen, !codexHere)
 
     setBusy(false)
-    showToast(result.ok ? t('newSession.opened', { terminal: result.terminal }) : `${t('newSession.failed')}: ${result.error}`)
-    if (result.ok) onClose()
+
+    if (!result.ok) {
+      showToast(`${t('newSession.failed')}: ${result.error}`)
+
+      return
+    }
+
+    onClose()
+
+    if (result.sessionId !== null) {
+      showToast(t('newSession.codexStarted'))
+      openChat(result.sessionId)
+    } else {
+      showToast(t('newSession.opened', { terminal: result.terminal }))
+    }
   }
 
   return (
@@ -96,7 +113,7 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
       <div className="sheet new-session" role="dialog" aria-modal="true" aria-label={t('newSession.title')} onClick={event => event.stopPropagation()}>
         <div className="confirm-body">
           <div className="sheet-title">{t('newSession.title')}</div>
-          <div className="confirm-hint">{inApp ? t('newSession.hintApp') : t('newSession.hint')}</div>
+          <div className="confirm-hint">{codexHere ? t('newSession.hintCodex') : inApp ? t('newSession.hintApp') : t('newSession.hint')}</div>
 
           {reachable.length > 1 && (
             <div className="form-row">
@@ -165,9 +182,15 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
           <label className="row">
             <span className="row-text">
               <span>{t('newSession.window')}</span>
-              {!canApp && terms !== null && <span className="row-hint">{t('newSession.windowOnly')}</span>}
+              {chosen === 'claude' && !canApp && terms !== null && <span className="row-hint">{t('newSession.windowOnly')}</span>}
             </span>
-            <input type="checkbox" className="switch" checked={!inApp} disabled={!canApp} onChange={event => setPcWindow(event.target.checked)} />
+            <input
+              type="checkbox"
+              className="switch"
+              checked={chosen === 'codex' ? pcWindow : !inApp}
+              disabled={chosen === 'claude' && !canApp}
+              onChange={event => setPcWindow(event.target.checked)}
+            />
           </label>
         </div>
         <footer className="sheet-actions">

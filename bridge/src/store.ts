@@ -179,6 +179,8 @@ export class Store {
   // Sessions running in one of this PC's terminals (opened from the app),
   // by session: typing into the terminal is how they take a prompt.
   readonly #terminalOf = new Map<string, string>()
+  // Codex sessions ChoiBuddy runs itself (through Codex's app-server).
+  readonly #managed = new Set<string>()
   // A Codex session that started in such a terminal, by Codex's own id: it
   // takes the place the app showed for the terminal, under that id.
   readonly #aliases = new Map<string, string>()
@@ -239,6 +241,38 @@ export class Store {
     const model = str(raw, 'model')
 
     if (session.agent === 'codex' && model !== null && model !== session.usage?.model) session.usage = { ...this.#usageOf(session), model }
+  }
+
+  manage(sessionId: string): void {
+    this.#managed.add(sessionId)
+  }
+
+  // A Codex session ChoiBuddy ran before the bridge restarted: shown again,
+  // idle, its record read from where Codex keeps it.
+  addKeptCodexChat(id: string, cwd: string, path: string | null, model: string | null, effort: string | null, at: number): void {
+    if (this.sessions.has(id)) return
+
+    const session = this.#create(id, cwd, 'default', at, 'codex')
+
+    session.usage = { ...this.#usageOf(session), model, effort }
+    this.sessions.set(id, session)
+    if (path !== null) this.#transcripts.set(id, path)
+    this.#managed.add(id)
+  }
+
+  isManaged(sessionId: string): boolean {
+    return this.#managed.has(sessionId)
+  }
+
+  // The model and effort picked for a Codex session ChoiBuddy runs.
+  setCodexSettings(sessionId: string, model: string | null, effort: string | null): void {
+    const session = this.sessions.get(sessionId)
+
+    if (session === undefined) return
+
+    const usage = this.#usageOf(session)
+
+    session.usage = { ...usage, model: model ?? usage.model, effort: effort ?? usage.effort }
   }
 
   // Codex opened in one of this PC's terminals: shown at once, before Codex
@@ -331,6 +365,7 @@ export class Store {
       canCommand: false,
       modOutdated: false,
       canStop: false,
+      managed: false,
     }
   }
 
@@ -362,6 +397,7 @@ export class Store {
       text,
       pendingId: pending?.id ?? null,
       pendingKind: pending?.kind ?? null,
+      agent: session.agent,
       at: this.#deps.now(),
     }
   }
@@ -665,6 +701,7 @@ export class Store {
       id: this.#deps.newId(),
       sessionId: session.id,
       sessionName: this.#nameOf(session),
+      agent: session.agent,
       kind,
       tool,
       detail: pendingDetail(kind, tool, toolInput, questions),
@@ -1053,7 +1090,7 @@ export class Store {
     for (const session of this.sessions.values()) {
       const ttl = session.status === 'ended' ? ENDED_TTL_MS : IDLE_TTL_MS
       // Quiet for hours, but Claude Code (or a terminal of the app) is still open: keep it.
-      const open = session.status !== 'ended' && (this.#modAlive(session.id, now) || this.#terminalOf.has(session.id))
+      const open = session.status !== 'ended' && (this.#modAlive(session.id, now) || this.#terminalOf.has(session.id) || this.#managed.has(session.id))
 
       if (!open && now - session.updatedAt > ttl && this.#pendingOf(session.id).length === 0) {
         this.sessions.delete(session.id)
@@ -1097,10 +1134,12 @@ export class Store {
         this.#names.has(session.id) || counts.get(this.#nameOf(session)) === 1
           ? this.#nameOf(session)
           : `${session.name} · ${session.id.slice(0, 4)}`,
-      canPrompt: this.#modAlive(session.id, now) || this.#terminalOf.has(session.id),
-      canCommand: this.#modAlive(session.id, now) && (this.#commands.has(session.id) || this.#latestCommands !== null),
+      canPrompt: this.#modAlive(session.id, now) || this.#terminalOf.has(session.id) || this.#managed.has(session.id),
+      managed: this.#managed.has(session.id),
+      // Codex ChoiBuddy runs takes its own commands (/compact, /review).
+      canCommand: this.#managed.has(session.id) || (this.#modAlive(session.id, now) && (this.#commands.has(session.id) || this.#latestCommands !== null)),
       modOutdated: this.#modOutdated(session.id, now),
-      canStop: (this.#modAlive(session.id, now) && modAtLeast(this.#modVersions.get(session.id), STOP_MOD)) || this.#terminalOf.has(session.id),
+      canStop: (this.#modAlive(session.id, now) && modAtLeast(this.#modVersions.get(session.id), STOP_MOD)) || this.#terminalOf.has(session.id) || this.#managed.has(session.id),
       queued: [
         ...(this.#outgoing.get(session.id) ?? []).map(item => ({ text: item.text, mode: item.mode })),
         ...(this.#commandsOut.get(session.id) ?? []).map(item => ({ text: `/${item.command}${item.args === '' ? '' : ` ${item.args}`}`, mode: 'command' as const })),

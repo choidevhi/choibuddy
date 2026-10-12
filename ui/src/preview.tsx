@@ -211,8 +211,8 @@ export function LiveCodeView({ stream }: { stream: LiveStream }) {
   )
 }
 
-// Claude's reply as it is being written, for the home screen.
-export function LiveReplyView({ stream }: { stream: LiveStream }) {
+// The agent's reply as it is being written, for the home screen.
+export function LiveReplyView({ stream, title }: { stream: LiveStream; title: string }) {
   const { t } = useI18n()
   const body = useRef<HTMLDivElement>(null)
   const text = useTypewriter(stream.text)
@@ -226,7 +226,7 @@ export function LiveReplyView({ stream }: { stream: LiveStream }) {
       <div className="panel-head">
         <span className="file-tab">
           <span className="live-badge">LIVE</span>
-          <span className="file-name">{t('home.reply')}</span>
+          <span className="file-name">{title}</span>
         </span>
         <span className="file-path">{t('live.replying')}</span>
       </div>

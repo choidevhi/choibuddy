@@ -24,6 +24,8 @@ data class Alert(
     val text: String,
     val pendingId: String?,
     val pendingKind: PendingKind?,
+    /** Codex가 묻는 것이면 true (예전 브리지는 이 필드가 없어 false). */
+    val codex: Boolean = false,
 )
 
 /** [detail]은 묻는 대상(명령, 파일 이름, 첫 질문)뿐이고 계획이면 비어 있다. */
@@ -33,6 +35,7 @@ data class PendingItem(
     val kind: PendingKind?,
     val tool: String,
     val detail: String,
+    val codex: Boolean = false,
 )
 
 enum class SessionStatus { THINKING, WORKING, WAITING, DONE, IDLE, ERROR, ENDED }
@@ -85,6 +88,7 @@ object Wire {
             text = o.text("text"),
             pendingId = o.textOrNull("pendingId"),
             pendingKind = enumOf<PendingKind>(o.text("pendingKind")),
+            codex = o.text("agent") == "codex",
         )
     }
 
@@ -106,6 +110,7 @@ object Wire {
                 kind = enumOf<PendingKind>(p.text("kind")),
                 tool = p.text("tool"),
                 detail = p.text("detail"),
+                codex = p.text("agent") == "codex",
             )
         }
 

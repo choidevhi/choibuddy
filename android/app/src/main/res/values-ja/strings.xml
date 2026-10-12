@@ -23,6 +23,7 @@
 
     <string name="notice_permission">許可リクエスト</string>
     <string name="notice_question">Claude からの質問</string>
+    <string name="notice_question_codex">Codex からの質問</string>
     <string name="notice_plan">プランの承認</string>
     <string name="notice_finished">完了</string>
     <string name="notice_error">エラーで停止</string>
@@ -35,6 +36,7 @@
     <string name="tool_read_file">ファイルを読み取り</string>
     <string name="tool_open_web">Web ページを開く</string>
     <string name="tool_use">%1$s を使用</string>
+    <string name="tool_more_access">権限を広げる</string>
 
     <string name="toast_invalid_pairing">正しい接続コードではありません</string>
     <string name="toast_scanner_unavailable">QR スキャナーを開けません</string>

@@ -4,6 +4,7 @@ package com.choidev.choibuddy
 interface Phrases {
     val permissionRequest: String
     val claudeAsks: String
+    val codexAsks: String
     val planApproval: String
     val finished: String
     val stoppedOnError: String
@@ -15,6 +16,7 @@ interface Phrases {
     val readFile: String
     val openWebPage: String
     val mcp: String
+    val moreAccess: String
 
     fun useTool(tool: String): String
 }
@@ -59,7 +61,7 @@ object AlertPlanner {
         AlertType.PENDING -> alert.pendingId
             ?.takeUnless { appVisible }
             ?.let { id ->
-                pending(id, alert.sessionName, pcName, alert.pendingKind, item?.tool, item?.detail ?: alert.text, phrases)
+                pending(id, alert.sessionName, pcName, alert.pendingKind, item?.tool, item?.detail ?: alert.text, alert.codex || item?.codex == true, phrases)
             }
 
         AlertType.RESOLVED -> alert.pendingId?.let(Notice::Withdraw)
@@ -70,7 +72,7 @@ object AlertPlanner {
 
     /** 스냅샷에 실린 요청 그대로의 알림(도구 이름까지 알 때). */
     fun forItem(item: PendingItem, pcName: String?, phrases: Phrases): Notice.Pending =
-        pending(item.id, item.sessionName, pcName, item.kind, item.tool, item.detail, phrases)
+        pending(item.id, item.sessionName, pcName, item.kind, item.tool, item.detail, item.codex, phrases)
 
     /**
      * 다시 연결된 뒤 첫 스냅샷에서 부른다. 끊겨 있던 사이 알림을 놓친 승인 요청을 띄우고,
@@ -98,6 +100,8 @@ object AlertPlanner {
         tool in EDIT_TOOLS -> phrases.editFile
         tool == "Read" -> phrases.readFile
         tool in WEB_TOOLS -> phrases.openWebPage
+        // Codex가 샌드박스 밖 권한(네트워크, 다른 폴더)을 청할 때.
+        tool == "Permissions" -> phrases.moreAccess
         tool.startsWith("mcp__") -> phrases.mcp
         else -> phrases.useTool(tool)
     }
@@ -109,12 +113,13 @@ object AlertPlanner {
         kind: PendingKind?,
         tool: String?,
         detail: String,
+        codex: Boolean,
         phrases: Phrases,
     ): Notice.Pending {
         val (label, body) = when (kind) {
             PendingKind.PERMISSION -> phrases.permissionRequest to join(tool?.let { actionOf(it, phrases) }, detail)
             PendingKind.PLAN -> phrases.planApproval to phrases.approvePlan
-            PendingKind.QUESTION, null -> phrases.claudeAsks to detail.ifBlank { phrases.pickAnAnswer }
+            PendingKind.QUESTION, null -> (if (codex) phrases.codexAsks else phrases.claudeAsks) to detail.ifBlank { phrases.pickAnAnswer }
         }
 
         return Notice.Pending(id, join(sessionName, pcName, label), body, buttonsFor(kind))

@@ -8,6 +8,13 @@ import org.junit.Test
 
 class WireTest {
     @Test
+    fun readsWhetherCodexAsks() {
+        val json = """{"type":"pending","sessionId":"s1","sessionName":"web","text":"Which color?","pendingId":"q1","pendingKind":"question","agent":"codex","at":1}"""
+
+        assertEquals(Alert(AlertType.PENDING, "s1", "web", "Which color?", "q1", PendingKind.QUESTION, codex = true), Wire.alert(json))
+    }
+
+    @Test
     fun parsesPendingAlert() {
         val json = """{"type":"pending","sessionId":"s1","sessionName":"choibuddy","text":"npm test",""" +
             """"pendingId":"p1","pendingKind":"permission","at":1760000000000}"""

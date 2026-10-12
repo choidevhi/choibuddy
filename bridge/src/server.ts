@@ -6,11 +6,12 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, DEFAULT_PORT, type HistoryEntry, type LiveStream, type Project, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
 import { type Config, type Device, hashToken, newToken, VERSION } from './config.ts'
-import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
+import { arr, asObject, bool, type Json, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
-import { Gallery } from './gallery.ts'
+import { Gallery, imageMime } from './gallery.ts'
 import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, type CodexTrust, codexTrust, fromCodex, setCodexHooks } from './codex.ts'
-import { CodexRollouts } from './codex-rollout.ts'
+import { CODEX_COMMANDS, CodexChats, type KeptChat } from './codex-chat.ts'
+import { CodexRollouts, emptyReading } from './codex-rollout.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
@@ -18,7 +19,7 @@ import { SessionMeta } from './meta.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
 import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
 import { baseName, type FileReader, languageOf } from './previews.ts'
-import { parseHookInput, parseSlash, RELOAD_COMMAND, type Revival, Store } from './store.ts'
+import { type HookInput, parseHookInput, parseSlash, RELOAD_COMMAND, type Revival, Store } from './store.ts'
 import { ownDevice, plainIp, readStatus, Tailnet } from './tailnet.ts'
 import { purgeTrash } from './trash.ts'
 
@@ -32,6 +33,10 @@ const TERM_FLUSH_MS = 12
 const HOLD_MS = 590_000
 const SNAPSHOT_THROTTLE_MS = 120
 const HEARTBEAT_MS = 15_000
+// Codex sessions ChoiBuddy ran, kept for the next start of the bridge.
+const KEPT_CHATS = 30
+// Picture types Codex takes as images with a prompt.
+const CODEX_IMAGES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 // A working Codex session's record is read this often (pictures, usage).
 const CODEX_READ_MS = 2_000
 const PRUNE_MS = 60_000
@@ -163,8 +168,31 @@ export type Bridge = {
   close: () => Promise<void>
 }
 
+// The Codex sessions kept by an earlier start of the bridge.
+function readKeptChats(path: string): KeptChat[] {
+  try {
+    const parsed: Json = JSON.parse(readFileSync(path, 'utf8'))
+
+    return (Array.isArray(parsed) ? objects(parsed) : []).flatMap(item => {
+      const id = str(item, 'id')
+      const cwd = str(item, 'cwd')
+
+      return id === null || cwd === null ? [] : [{ id, cwd, path: str(item, 'path'), model: str(item, 'model'), effort: str(item, 'effort'), startedAt: num(item, 'startedAt') ?? 0 }]
+    })
+  } catch {
+    return []
+  }
+}
+
 type Held = {
   res: ServerResponse
+  timer: NodeJS.Timeout
+}
+
+// An approval waiting for the person: answered with the hook's output, and
+// the decision itself when there is one (none: it timed out or went away).
+type HeldApproval = {
+  answer: (output: JsonObject, decision: Decision | null) => void
   timer: NodeJS.Timeout
 }
 
@@ -426,6 +454,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       }
     }
   }
+  // Pictures uploaded for this prompt, which Codex then sees as images too,
+  // not only as paths in the text.
+  const uploadedImages = (sessionId: string, text: string): string[] =>
+    [...waitingUploads].flatMap(([path, upload]) => (upload.sessionId === sessionId && text.includes(path) && CODEX_IMAGES.has(imageMime(path) ?? '') ? [path] : []))
   const autoLanguage = new AutoLanguage()
   // First prompts for sessions opened from a device, waiting for them to start.
   const launchPrompts: LaunchPrompt[] = []
@@ -433,7 +465,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const browserWaits = new Map<string, Held>()
 
   purgeTrash(trashDir, now())
-  const held = new Map<string, Held>()
+  const held = new Map<string, HeldApproval>()
   // Each live stream and which device opened it (null: this PC's own code).
   const clients = new Map<ServerResponse, string | null>()
   let lastSeenSave = 0
@@ -541,14 +573,14 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
   // Answers a held PermissionRequest hook. An empty answer means "no
   // decision": Claude Code keeps its own dialog open in the terminal.
-  const finish = (id: string, output: JsonObject): void => {
+  const finish = (id: string, output: JsonObject, decision: Decision | null = null): void => {
     const entry = held.get(id)
 
     if (entry === undefined) return
 
     held.delete(id)
     clearTimeout(entry.timer)
-    sendJson(entry.res, 200, output)
+    entry.answer(output, decision)
 
     const alert = store.resolvePending(id)
 
@@ -584,7 +616,9 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     const input = parsed === null ? null : store.resolve(parsed)
 
-    if (input === null) {
+    // A Codex session ChoiBuddy runs reports through its app-server; its own
+    // hooks would tell the same twice. Approvals still come this way.
+    if (input === null || (store.isManaged(input.sessionId) && input.event !== 'PermissionRequest')) {
       sendJson(res, 200, {})
 
       return
@@ -609,7 +643,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
       const timer = setTimeout(() => finish(pending.id, {}), holdMs)
 
-      held.set(pending.id, { res, timer })
+      held.set(pending.id, { answer: output => sendJson(res, 200, output), timer })
       res.on('close', () => {
         const entry = held.get(pending.id)
 
@@ -631,6 +665,13 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       return
     }
 
+    sendJson(res, 200, {})
+    applyHook(input)
+  }
+
+  // A hook's event on the store, or one in its shape from a Codex session
+  // ChoiBuddy runs itself.
+  const applyHook = (input: HookInput): void => {
     const result = store.apply(input)
 
     if (fromCodex(input.raw)) readCodexRecord(input.sessionId)
@@ -640,14 +681,95 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     if (input.event === 'Stop') {
       const ask = autoLanguage.onStop(input.sessionId, str(input.raw, 'last_assistant_message') ?? '', config.autoLanguage)
 
-      if (ask !== null) log(`auto language: asked ${input.sessionId} again (${store.queuePrompt(input.sessionId, ask, 'queue')})`)
+      if (ask !== null) log(`auto language: asked ${input.sessionId} again (${promptSession(input.sessionId, ask, 'queue')})`)
     }
 
-    sendJson(res, 200, {})
     for (const id of result.cleared) finish(id, {})
     for (const alert of result.alerts) emit(alert)
     scheduleSnapshot()
   }
+
+  // A prompt for a session: Codex ChoiBuddy runs gets it at once, any other
+  // through its mod.
+  const promptSession = (sessionId: string, text: string, mode: PromptMode): string => {
+    if (!store.isManaged(sessionId)) return store.queuePrompt(sessionId, text, mode)
+    void chats.send(sessionId, text, mode !== 'queue')
+
+    return 'queued'
+  }
+
+  // Codex asks the person in a session ChoiBuddy runs (an approval, a
+  // question): answered like any other, approvals also by Auto Accept.
+  const askCodex = (raw: JsonObject, answer: (decision: Decision | null) => void): void => {
+    const input = parseHookInput(raw)
+
+    if (input === null) {
+      answer(null)
+
+      return
+    }
+
+    const { pending, alert } = store.addPending(input)
+
+    if (autoAcceptUntil > now() && pending.kind === 'permission') {
+      store.resolvePending(pending.id)
+      answer({ id: pending.id, behavior: 'allow', message: null, answers: null })
+      emit({ ...alert, type: 'auto' })
+      scheduleSnapshot()
+      log(`auto-accepted ${pending.tool} (${pending.sessionName})`)
+
+      return
+    }
+
+    held.set(pending.id, {
+      answer: (_output, decision) => answer(decision),
+      timer: setTimeout(() => finish(pending.id, {}), holdMs),
+    })
+    emit(alert)
+    scheduleSnapshot()
+    log(`pending ${pending.kind} ${pending.tool} (${pending.sessionName}, Codex)`)
+  }
+
+  const chats = new CodexChats(
+    () => codexTools.cli() ?? codexApp(),
+    {
+      hook: raw => {
+        const input = parseHookInput(raw)
+
+        if (input !== null) applyHook(input)
+      },
+      reply: (threadId, text) => {
+        const tail = streamTail(text)
+
+        sendEvent('stream', JSON.stringify({ sessionId: threadId, toolUseId: null, tool: null, path: null, language: 'plain', skippedLines: tail.skippedLines, text: tail.text, at: now() }))
+      },
+      approval: askCodex,
+      picture: (threadId, picture) => {
+        if (store.applyCodexReading(threadId, { ...emptyReading(), pictures: [picture] })) scheduleSnapshot()
+      },
+      limits: windows => {
+        store.codexLimits = { windows, at: now() }
+        scheduleSnapshot()
+      },
+      keep: kept => {
+        try {
+          writeFileSync(codexChatsFile, `${JSON.stringify(kept.slice(-KEPT_CHATS))}\n`)
+        } catch (error) {
+          log(`codex chats not kept: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      },
+      log,
+    },
+    VERSION,
+  )
+
+  // Codex sessions ChoiBuddy ran before this start: back in the list, and
+  // resumed in Codex when a message goes to one.
+  const codexChatsFile = join(dirname(options.galleryDir), 'codex-chats.json')
+  const keptChats = readKeptChats(codexChatsFile)
+
+  chats.remember(keptChats)
+  for (const chat of keptChats) store.addKeptCodexChat(chat.id, chat.cwd, chat.path, chat.model, chat.effort, chat.startedAt)
 
   const handleDevices = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
     if (req.method === 'GET' && url.pathname === '/api/devices') {
@@ -962,7 +1084,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       }
 
       log(`decided ${decision.behavior} ${decision.id}`)
-      finish(decision.id, output)
+      finish(decision.id, output, decision)
       sendJson(res, 200, { ok: true })
 
       return
@@ -1183,6 +1305,22 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const mode: PromptMode = requestedMode === 'queue' ? 'queue' : 'interrupt'
       const term = store.terminalOf(sessionId)
 
+      // Codex ChoiBuddy runs takes it at once: a turn of its own, or (sent
+      // now while it works) after stopping the running one.
+      if (store.isManaged(sessionId)) {
+        const slash = parseSlash(text)
+        const sent =
+          slash !== null && CODEX_COMMANDS.some(command => command.name === slash.command)
+            ? await chats.command(sessionId, slash.command, slash.args, mode !== 'queue')
+            : await chats.send(sessionId, text, mode !== 'queue', uploadedImages(sessionId, text))
+
+        if (sent) sendUploads(sessionId, text)
+        log(`prompt for codex ${sessionId}: ${sent ? 'sent' : 'gone'}`)
+        sendJson(res, sent ? 200 : 409, { ok: sent, result: sent ? 'queued' : 'no-mod' })
+
+        return
+      }
+
       // A session in one of this PC's terminals (Codex) takes it typed in,
       // its own slash commands too; sending now presses Esc first.
       if (term !== undefined) {
@@ -1212,7 +1350,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/commands') {
-      sendJson(res, 200, { ok: true, commands: store.commandsFor(url.searchParams.get('session') ?? '') })
+      const session = url.searchParams.get('session') ?? ''
+
+      // Codex ChoiBuddy runs offers Codex's own commands, not Claude's.
+      sendJson(res, 200, { ok: true, commands: store.isManaged(session) ? CODEX_COMMANDS : store.commandsFor(session) })
 
       return
     }
@@ -1321,6 +1462,15 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const sessionId = str(body === null ? null : parseJsonObject(body), 'sessionId') ?? ''
       const term = store.terminalOf(sessionId)
 
+      if (store.isManaged(sessionId)) {
+        const stopped = await chats.stop(sessionId)
+
+        log(`stop codex ${sessionId}: ${stopped ? 'ok' : 'nothing running'}`)
+        sendJson(res, stopped ? 200 : 409, stopped ? { ok: true } : { ok: false, error: 'idle' })
+
+        return
+      }
+
       if (term !== undefined) {
         const pressed = terminals.escape(term)
 
@@ -1346,6 +1496,16 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
       if (session === undefined || session.status === 'ended') {
         sendJson(res, 404, { ok: false, error: 'not open' })
+
+        return
+      }
+
+      // Codex ChoiBuddy runs ends here.
+      if (store.isManaged(sessionId)) {
+        const ended = await chats.end(sessionId)
+
+        log(`ended codex ${sessionId}: ${ended}`)
+        sendJson(res, ended ? 200 : 409, { ok: ended })
 
         return
       }
@@ -1511,6 +1671,28 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     // Codex on this PC: whether it is there, ChoiBuddy's hooks are listed and
     // Codex trusts them.
+    if (req.method === 'GET' && url.pathname === '/api/codex/models') {
+      sendJson(res, 200, { ok: true, models: await chats.models() })
+
+      return
+    }
+
+    // The model and effort the next turn of a Codex session ChoiBuddy runs uses.
+    if (req.method === 'POST' && url.pathname === '/api/codex/settings') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const parsed = body === null ? null : parseJsonObject(body)
+      const sessionId = str(parsed, 'sessionId') ?? ''
+      const model = str(parsed, 'model') || null
+      const effort = str(parsed, 'effort') || null
+      const set = chats.setSettings(sessionId, model, effort)
+
+      if (set) store.setCodexSettings(sessionId, model, effort)
+      scheduleSnapshot()
+      sendJson(res, set ? 200 : 404, { ok: set })
+
+      return
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/codex') {
       sendJson(res, 200, await codexStatus(false))
 
@@ -1636,6 +1818,32 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const cwd = str(parsed, 'cwd')?.trim() ?? ''
       const prompt = str(parsed, 'prompt')?.trim() ?? ''
       const codex = str(parsed, 'agent') === 'codex'
+
+      // Codex ChoiBuddy runs itself: no terminal, the chat is where it lives.
+      if (codex && bool(parsed, 'window') !== true) {
+        if (!isFolder(cwd)) {
+          sendJson(res, 400, { ok: false, error: 'no such folder' })
+
+          return
+        }
+
+        const started = await chats.start(cwd, str(parsed, 'model'), str(parsed, 'effort'))
+
+        if (!started.ok) {
+          log(`codex chat failed: ${started.error}`)
+          sendJson(res, 400, { ok: false, error: started.error })
+
+          return
+        }
+
+        store.manage(started.threadId)
+        if (prompt !== '') void chats.send(started.threadId, prompt, false)
+        log(`codex chat ${started.threadId} in ${cwd}`)
+        scheduleSnapshot()
+        sendJson(res, 200, { ok: true, terminal: 'ChoiBuddy', sessionId: started.threadId })
+
+        return
+      }
       // Codex starts without the first prompt here: a terminal window would
       // split it up as its own arguments. The in-app terminal can pass it.
       const opened = codex ? openTerminal(cwd, codexLaunch() ?? ['codex']) : openSession(cwd)
@@ -1838,6 +2046,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
   const close = async (): Promise<void> => {
     terminals.closeAll()
+    chats.close()
     for (const timer of timers) clearInterval(timer)
     if (snapshotTimer !== null) clearTimeout(snapshotTimer)
     for (const id of [...held.keys()]) finish(id, {})
