@@ -185,6 +185,18 @@ export class Gallery {
     return this.#add({ id: this.#newId(), ...origin, name: baseName(path), path, source, mime, at: now })
   }
 
+  // A picture read back from a file later (Codex's own record): once per
+  // session, at the time it was made.
+  addFileOnce(origin: ImageOrigin, path: string, at: number): GalleryImage | null {
+    if (this.#entries.some(entry => entry.path === path && entry.sessionId === origin.sessionId)) return null
+
+    const mime = imageMime(path)
+
+    if (mime === null || !existsSync(path)) return null
+
+    return this.#add({ id: this.#newId(), ...origin, name: baseName(path), path, source: 'file', mime, at })
+  }
+
   addCapture(origin: ImageOrigin, image: InlineImage): GalleryImage | null {
     const bytes = Buffer.from(image.data, 'base64')
 

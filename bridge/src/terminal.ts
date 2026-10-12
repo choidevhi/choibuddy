@@ -47,8 +47,9 @@ type Term = TermInfo & { pty: Pty; backlog: string; listeners: Set<Listener>; pa
 export const TERM_ENV = 'CHOIBUDDY_TERM'
 // Esc first (Codex stops on it), then the message once that settled.
 const ESC_SETTLE_MS = 300
-// The paste is read before Enter sends it.
-const ENTER_AFTER_MS = 60
+// Enter waits this long after the text: Codex reads fast typing as a paste
+// and an Enter right after it as a new line, not as send.
+const ENTER_AFTER_MS = 600
 
 // Output kept for a screen that joins later.
 const BACKLOG_CHARS = 256 * 1024

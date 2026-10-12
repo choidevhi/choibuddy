@@ -3,7 +3,7 @@ import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window'
 import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Alert, Limits, Pending, Session } from '../../shared/protocol.ts'
 import { overallLink, useNow, useShell, useShownSession } from './App.tsx'
-import { feedFor, merge, useFeeds } from './feeds.ts'
+import { feedFor, limitsFor, merge, useFeeds } from './feeds.ts'
 import { agentPose, Buddy, lookFor, type Tone, tintFor } from './buddy.tsx'
 import { I18nContext, translator, type Translate } from './i18n.ts'
 import { CheckIcon, XIcon } from './icons.tsx'
@@ -351,7 +351,7 @@ export function FloatApp() {
     <I18nContext.Provider value={{ lang, t }}>
       <div className="float" ref={root}>
         <div className="fb-stack">
-          {hover && <StatsBubble session={current} limits={current === null || current.agent === 'codex' ? null : (merged.limits.get(current.pcKey) ?? null)} now={now} t={t} />}
+          {hover && <StatsBubble session={current} limits={limitsFor(merged, current)} now={now} t={t} />}
           {liveEvents.map(item => (
             <button type="button" key={item.id} className={`fb fb--${item.kind}`} onClick={() => void windowsShell.showMain()}>
               <span className="fb-kicker">

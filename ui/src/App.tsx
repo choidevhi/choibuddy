@@ -539,6 +539,7 @@ export function App() {
                 streams={merged.streams}
                 sessions={ordered}
                 limits={merged.limits}
+                codexLimits={merged.codexLimits}
                 auto={current}
                 link={sources.length === 0 ? 'connecting' : link}
                 tone={tone}

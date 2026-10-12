@@ -42,6 +42,22 @@ type Props = {
   onSend: (sessionId: string, text: string) => Promise<boolean>
 }
 
+// A Codex session's model and effort, as its record says.
+export function CodexModel({ session }: { session: Session }) {
+  const { t } = useI18n()
+  const model = session.usage?.model ?? null
+  const effort = session.usage?.effort ?? null
+
+  return (
+    <div className="model-control">
+      <span className="model-chip model-chip--still">
+        <span className="model-chip-name">{model ?? 'Codex'}</span>
+        {effort !== null && <span className="model-chip-effort">{effortLabel(t, effort)}</span>}
+      </span>
+    </div>
+  )
+}
+
 // The session's model and effort, and a menu to change either. Changes go
 // to Claude Code as /model and /effort, the same as typing them.
 export function ModelControl({ session, onSend }: Props) {

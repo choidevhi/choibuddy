@@ -4316,3 +4316,7 @@ body.resizing--column {
 .mod-notice-close:hover {
   opacity: 1;
 }
+
+.model-chip--still {
+  cursor: default;
+}

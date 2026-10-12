@@ -10,6 +10,7 @@ import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObjec
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
 import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, type CodexTrust, codexTrust, fromCodex, setCodexHooks } from './codex.ts'
+import { CodexRollouts } from './codex-rollout.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
@@ -31,6 +32,8 @@ const TERM_FLUSH_MS = 12
 const HOLD_MS = 590_000
 const SNAPSHOT_THROTTLE_MS = 120
 const HEARTBEAT_MS = 15_000
+// A working Codex session's record is read this often (pictures, usage).
+const CODEX_READ_MS = 2_000
 const PRUNE_MS = 60_000
 const TAILNET_CHECK_MS = 30_000
 const PREVIEW_FILE_LIMIT = 1_000_000
@@ -553,6 +556,16 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     scheduleSnapshot()
   }
 
+  // What Codex's own record of a session adds to its hooks: model and
+  // effort, usage and the account's windows, and the pictures it made.
+  const codexRollouts = new CodexRollouts()
+  const readCodexRecord = (sessionId: string): void => {
+    const path = store.transcriptPath(sessionId)
+    const reading = path === null ? null : codexRollouts.read(path)
+
+    if (reading !== null && store.applyCodexReading(sessionId, reading)) scheduleSnapshot()
+  }
+
   const handleHook = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const body = await readBody(req, HOOK_BODY_LIMIT)
     const raw = body === null ? null : parseJsonObject(body)
@@ -620,6 +633,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     const result = store.apply(input)
 
+    if (fromCodex(input.raw)) readCodexRecord(input.sessionId)
     if (input.event === 'UserPromptSubmit') autoLanguage.onPrompt(input.sessionId, str(input.raw, 'prompt') ?? '')
 
     // A reply in another language than the person's: ask for it again in theirs.
@@ -1172,7 +1186,9 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       // A session in one of this PC's terminals (Codex) takes it typed in,
       // its own slash commands too; sending now presses Esc first.
       if (term !== undefined) {
-        const typed = terminals.type(term, text, mode === 'interrupt')
+        // Esc only stops a turn that runs: an idle Codex takes it as "edit the last message".
+        const status = store.sessions.get(sessionId)?.status
+        const typed = terminals.type(term, text, mode === 'interrupt' && (status === 'working' || status === 'thinking' || status === 'waiting'))
 
         if (typed) sendUploads(sessionId, text)
         log(`prompt typed into terminal ${term} for ${sessionId}: ${typed ? 'ok' : 'gone'}`)
@@ -1791,6 +1807,12 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     setInterval(() => {
       for (const client of clients.keys()) client.write(': ping\n\n')
     }, HEARTBEAT_MS),
+    // Codex writes pictures and token counts while it works, between hooks.
+    setInterval(() => {
+      for (const session of store.sessions.values()) {
+        if (session.agent === 'codex' && (session.status === 'working' || session.status === 'thinking')) readCodexRecord(session.id)
+      }
+    }, CODEX_READ_MS),
     setInterval(() => {
       if (store.prune().length > 0) scheduleSnapshot()
     }, PRUNE_MS),

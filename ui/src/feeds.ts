@@ -250,8 +250,17 @@ export type Merged = {
   sessions: PcSession[]
   pending: PcPending[]
   limits: ReadonlyMap<string, Limits | null>
+  // The Codex account's windows, per PC.
+  codexLimits: ReadonlyMap<string, Limits | null>
   galleryLatest: number
   multiPc: boolean
+}
+
+// The account windows a session counts against: Claude's or Codex's, on its PC.
+export function limitsFor(merged: Pick<Merged, 'limits' | 'codexLimits'>, session: PcSession | null): Limits | null {
+  if (session === null) return null
+
+  return (session.agent === 'codex' ? merged.codexLimits : merged.limits).get(session.pcKey) ?? null
 }
 
 // One view over every PC. A PC reachable through two addresses (same pcId)
@@ -261,6 +270,7 @@ export function merge(feeds: Feed[]): Merged {
   const sessions: PcSession[] = []
   const pending: PcPending[] = []
   const limits = new Map<string, Limits | null>()
+  const codexLimits = new Map<string, Limits | null>()
   const streams = new Map<string, LiveStream>()
   let galleryLatest = 0
   let pcs = 0
@@ -278,6 +288,8 @@ export function merge(feeds: Feed[]): Merged {
     for (const session of snapshot.sessions) sessions.push({ ...session, uid: `${feed.key}|${session.id}`, pcKey: feed.key, pcName })
     for (const item of snapshot.pending) pending.push({ ...item, uid: `${feed.key}|${item.id}`, pcKey: feed.key, pcName })
     limits.set(feed.key, snapshot.limits)
+    // A bridge from before Codex usage has none.
+    codexLimits.set(feed.key, snapshot.codexLimits ?? null)
     for (const [sessionId, live] of feed.streams) streams.set(sessionId, live)
     galleryLatest = Math.max(galleryLatest, snapshot.gallery.latestAt)
   }
@@ -285,7 +297,7 @@ export function merge(feeds: Feed[]): Merged {
   sessions.sort((a, b) => b.updatedAt - a.updatedAt)
   pending.sort((a, b) => a.createdAt - b.createdAt)
 
-  return { streams, sessions, pending, limits, galleryLatest, multiPc: pcs > 1 }
+  return { streams, sessions, pending, limits, codexLimits, galleryLatest, multiPc: pcs > 1 }
 }
 
 export function feedFor(feeds: Feed[], pcKey: string | undefined): Feed | null {

@@ -365,6 +365,8 @@ export type Snapshot = {
   sessions: Session[]
   pending: Pending[]
   limits: Limits | null
+  // The Codex account's windows, from the newest Codex session's record.
+  codexLimits: Limits | null
   gallery: GallerySummary
 }
 

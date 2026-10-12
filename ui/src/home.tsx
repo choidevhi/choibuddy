@@ -6,7 +6,7 @@ import { Buddy, type Look, type Tone } from './buddy.tsx'
 import { type CommandsFn, Composer, type UploadFn } from './chat.tsx'
 import { ago, duration, useI18n } from './i18n.ts'
 import { BanIcon, CheckCircleIcon, KindIcon, PlusIcon, SpinnerIcon, XCircleIcon } from './icons.tsx'
-import { ModelControl, modelLabel } from './model.tsx'
+import { CodexModel, ModelControl, modelLabel } from './model.tsx'
 import { LiveCodeView, LiveReplyView, MessageView, PreviewView } from './preview.tsx'
 import { UsageStrip } from './usage.tsx'
 
@@ -248,7 +248,7 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
             </button>
           </div>
         ) : showMessage && session.message !== null ? (
-          <MessageView title={t('home.reply')} text={session.message} />
+          <MessageView title={t(session.agent === 'codex' ? 'home.replyCodex' : 'home.reply')} text={session.message} />
         ) : selected !== null && selected.preview !== null ? (
           <PreviewView preview={selected.preview} cwd={session.cwd} running={selected.status === 'running'} />
         ) : session.prompt !== null ? (
@@ -262,8 +262,13 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
         {session !== null && <AgentLane agents={session.agents} selectedId={agentId} tone={tone} now={now} onSelect={setAgentId} />}
         {session !== null && <Composer session={session} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact />}
       </section>
-      {/* Codex reports no usage, and the limits and model menu are Claude's. */}
-      {session?.agent !== 'codex' && <UsageStrip usage={session?.usage ?? null} limits={limits} now={now} lead={session === null ? null : <ModelControl session={session} onSend={onSend} />} />}
+      {/* Codex's model and effort come from its own record; they change in Codex. */}
+      <UsageStrip
+        usage={session?.usage ?? null}
+        limits={limits}
+        now={now}
+        lead={session === null ? null : session.agent === 'codex' ? <CodexModel session={session} /> : <ModelControl session={session} onSend={onSend} />}
+      />
     </div>
   )
 }

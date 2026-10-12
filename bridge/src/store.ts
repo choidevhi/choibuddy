@@ -24,6 +24,7 @@ import { PROTOCOL_VERSION } from '../../shared/protocol.ts'
 import { type Gallery, imageMime, inlineImages } from './gallery.ts'
 import { arr, bool, type Json, type JsonObject, num, obj, objects, str } from './json.ts'
 import { fromCodex } from './codex.ts'
+import type { CodexReading } from './codex-rollout.ts'
 import { baseName, type FileReader, kindOf, resultPreview, stepTitle, todosOf, toolPreview } from './previews.ts'
 
 const MAX_STEPS = 40
@@ -155,6 +156,7 @@ export class Store {
   readonly sessions = new Map<string, Session>()
   readonly pending = new Map<string, PendingEntry>()
   limits: Limits | null = null
+  codexLimits: Limits | null = null
   readonly #modSeen = new Map<string, number>()
   // Sessions asked to stop, until their mod polls.
   readonly #stops = new Set<string>()
@@ -704,6 +706,46 @@ export class Store {
     return permissionOutput(entry, decision)
   }
 
+  // What a Codex session's record adds to its hooks: model and effort,
+  // token use and context, the Codex account's windows, and its pictures.
+  applyCodexReading(sessionId: string, reading: CodexReading): boolean {
+    const session = this.sessions.get(sessionId)
+
+    if (session === undefined) return false
+
+    const now = this.#deps.now()
+    const usage = this.#usageOf(session)
+    const input = reading.inputTokens ?? null
+    const cached = reading.cachedTokens ?? 0
+    let changed = false
+
+    if (reading.windows.length > 0) {
+      this.codexLimits = { windows: reading.windows, at: now }
+      changed = true
+    }
+
+    if (reading.model !== null || reading.effort !== null || reading.contextTokens !== null || input !== null) {
+      usage.model = reading.model ?? usage.model
+      usage.effort = reading.effort ?? usage.effort
+      usage.contextTokens = reading.contextTokens ?? usage.contextTokens
+      usage.contextWindow = reading.contextWindow ?? usage.contextWindow
+      if (usage.contextTokens !== null && usage.contextWindow !== null && usage.contextWindow > 0) usage.contextPercent = (usage.contextTokens / usage.contextWindow) * 100
+      if (input !== null) {
+        usage.inputTokens = Math.max(0, input - cached)
+        usage.cacheReadTokens = cached
+      }
+      usage.outputTokens = reading.outputTokens ?? usage.outputTokens
+      session.usage = usage
+      changed = true
+    }
+
+    for (const picture of reading.pictures) {
+      if (this.#deps.gallery.addFileOnce({ sessionId: session.id, sessionName: session.name, tool: picture.tool }, picture.path, picture.at) !== null) changed = true
+    }
+
+    return changed
+  }
+
   // Figures the companion mod reports: the context window, account rate
   // limits, cost, and each model request's token use.
   applyUsage(body: JsonObject): boolean {
@@ -1069,7 +1111,7 @@ export class Store {
       .map(entry => ({ ...entry.pending, sessionName: names.get(entry.pending.sessionId) ?? entry.pending.sessionName }))
       .sort((a, b) => a.createdAt - b.createdAt)
 
-    return { protocol: PROTOCOL_VERSION, serverTime: now, server, sessions: named, pending, limits: this.limits, gallery: this.#deps.gallery.summary() }
+    return { protocol: PROTOCOL_VERSION, serverTime: now, server, sessions: named, pending, limits: this.limits, codexLimits: this.codexLimits, gallery: this.#deps.gallery.summary() }
   }
 }
 

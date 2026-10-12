@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Limits, LiveStream } from '../../shared/protocol.ts'
 import { lookFor, type Tone } from './buddy.tsx'
 import type { CommandsFn, UploadFn } from './chat.tsx'
-import { type Feed, feedFor, type PcSession } from './feeds.ts'
+import { type Feed, feedFor, limitsFor, type PcSession } from './feeds.ts'
 import { Home } from './home.tsx'
 import { useI18n } from './i18n.ts'
 import { BrowserPane } from './browser.tsx'
@@ -20,6 +20,7 @@ type Props = {
   streams: ReadonlyMap<string, LiveStream>
   sessions: PcSession[]
   limits: ReadonlyMap<string, Limits | null>
+  codexLimits: ReadonlyMap<string, Limits | null>
   // The session a following pane shows: the one asking, else the one at work.
   auto: PcSession | null
   link: LinkState
@@ -38,7 +39,7 @@ type Props = {
 // The home screen, PC by PC: the PCs as buddies, the chosen PC's sessions,
 // and live views in panes that split left/right or top/bottom like tmux.
 // A pane follows whichever session is busy until a session is picked for it.
-export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone, now, compact, short, onSend, onUpload, loadCommands, onNewSession, onOpenChat }: Props) {
+export function HomeScreen({ feeds, streams, sessions, limits, codexLimits, auto, link, tone, now, compact, short, onSend, onUpload, loadCommands, onNewSession, onOpenChat }: Props) {
   const { t } = useI18n()
   const [tile, setTile] = useTiles('homeTiles')
   const [focusId, setFocusId] = useState('')
@@ -164,7 +165,7 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
                       session={session}
                       stream={session === null ? null : (streams.get(session.id) ?? null)}
                       sessions={sessions}
-                      limits={session === null ? null : (limits.get(session.pcKey) ?? null)}
+                      limits={limitsFor({ limits, codexLimits }, session)}
                       look={lookFor(session, leaf.sessionId === null ? link : (feed?.link ?? 'offline'), now)}
                       tone={tone}
                       now={now}
