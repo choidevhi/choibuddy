@@ -3823,3 +3823,165 @@ body.resizing {
   padding: 13px 14px;
   font-size: 15px;
 }
+
+/* Panes split like tmux: halves side by side or one over the other */
+
+.pane-row > .tiles,
+.pane-row > .tile {
+  flex: 1;
+}
+
+.tiles {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tiles--row {
+  flex-direction: row;
+}
+
+.tiles--column {
+  flex-direction: column;
+}
+
+.tiles-half {
+  display: flex;
+  flex-basis: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tiles-half > .tiles,
+.tiles-half > .tile {
+  flex: 1;
+}
+
+.tile {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tile > .convo-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.tiles-divider {
+  flex: none;
+  position: relative;
+}
+
+.tiles-divider--row {
+  width: 7px;
+  margin: 10px 0;
+  cursor: col-resize;
+}
+
+.tiles-divider--column {
+  height: 7px;
+  margin: 0 10px;
+  cursor: row-resize;
+}
+
+.tiles-divider::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: var(--panel-line);
+  transition: background 0.12s;
+}
+
+.tiles-divider--row::after {
+  inset: 0 3px;
+}
+
+.tiles-divider--column::after {
+  inset: 3px 0;
+}
+
+.tiles-divider:hover::after {
+  background: var(--accent);
+}
+
+body.resizing--column {
+  cursor: row-resize;
+}
+
+/* Home panes */
+
+.home-tile {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow 0.12s;
+}
+
+.home-tile > .home {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.home-tile--focused {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.tile-tools {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+
+.home-tile:hover .tile-tools,
+.tile-tools:focus-within {
+  opacity: 1;
+}
+
+.tile-tool {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--card-line);
+  color: var(--muted);
+}
+
+.tile-tool:hover {
+  color: var(--text);
+}
+
+.tile-tool--text {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* Images, PC by PC */
+
+.convo--gallery > .gallery {
+  min-width: 0;
+  min-height: 0;
+}
+
+.convo--gallery .convo-select-row {
+  margin: 0 0 12px;
+}
+
+.convo-dot-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}

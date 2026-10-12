@@ -5,12 +5,12 @@ import { answerBrowserRequest, BrowserTab } from './browser.tsx'
 import { type Feed, feedFor, loadSources, merge, type PcSession, type Source, useFeeds } from './feeds.ts'
 import { useTailnetAutoConnect } from './autoconnect.ts'
 import { closeTopLayer } from './back.ts'
-import { Buddy, lookFor, type Tone } from './buddy.tsx'
+import { Buddy, type Tone } from './buddy.tsx'
 import { Chat } from './chat.tsx'
 import { Connect, type Prefs } from './connect.tsx'
 import { Docs } from './docs.tsx'
 import { Gallery } from './gallery.tsx'
-import { Home } from './home.tsx'
+import { HomeScreen } from './homescreen.tsx'
 import { detectLang, I18nContext, type Lang, LANGS, translator } from './i18n.ts'
 import {
   ChatIcon,
@@ -292,7 +292,6 @@ export function App() {
   const pinnedId = pin !== null && now - pin.at < PIN_MS ? pin.id : null
   const current: PcSession | null = useShownSession(sessions, pinnedId, now)
   const link = overallLink(feeds)
-  const look = lookFor(current, sources.length === 0 ? 'connecting' : link, now)
   const pending = merged.pending
   const currentFeed = feedFor(feeds, current?.pcKey) ?? feeds[0] ?? null
   const localFeed = feeds.find(feed => feed.local) ?? null
@@ -383,6 +382,25 @@ export function App() {
     setTab(next)
   }
 
+  // Ctrl+PageUp / Ctrl+PageDown step through the tabs, as in a browser.
+  useEffect(() => {
+    const tabs: Tab[] = platform === 'windows' ? ['home', 'chat', 'gallery', 'browser', 'docs', 'connect'] : ['home', 'chat', 'gallery', 'docs', 'connect']
+
+    const onKey = (event: KeyboardEvent): void => {
+      if (!event.ctrlKey || (event.key !== 'PageUp' && event.key !== 'PageDown')) return
+      event.preventDefault()
+
+      const at = Math.max(0, tabs.indexOf(activeTab))
+      const next = tabs[(at + (event.key === 'PageDown' ? 1 : tabs.length - 1)) % tabs.length]
+
+      if (next !== undefined) openTab(next)
+    }
+
+    window.addEventListener('keydown', onKey)
+
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   // The phone's back button: close what is open, then go to the previous tab.
   // On home (or the first-run setup) there is nothing left, and the app goes.
   useEffect(() => {
@@ -429,18 +447,7 @@ export function App() {
               </button>
             </nav>
 
-            <div className="dots" data-tauri-drag-region>
-              {ordered.length > 1 &&
-                ordered.map(session => (
-                  <button
-                    type="button"
-                    key={session.id}
-                    className={`dot dot--${session.status} ${session.id === current?.id ? 'on' : ''}`}
-                    title={session.name}
-                    onClick={() => setPin({ id: session.id, at: Date.now() })}
-                  />
-                ))}
-            </div>
+            <div className="dots" data-tauri-drag-region />
 
             {hiddenCount > 0 && shown === null && (
               <button type="button" className="pending-badge" onClick={() => setLater(new Set())}>
@@ -494,21 +501,25 @@ export function App() {
                 )}
               </div>
             ) : activeTab === 'home' ? (
-              <Home
-                session={current}
-                stream={current === null ? null : (merged.streams.get(current.id) ?? null)}
+              <HomeScreen
+                feeds={feeds}
+                streams={merged.streams}
                 sessions={ordered}
-                limits={current === null ? null : (merged.limits.get(current.pcKey) ?? null)}
-                look={look}
+                limits={merged.limits}
+                auto={current}
+                link={sources.length === 0 ? 'connecting' : link}
                 tone={tone}
                 now={now}
                 compact={compact}
                 short={short}
-                onPick={id => setPin({ id, at: Date.now() })}
                 onSend={onSend}
                 onUpload={onUpload}
                 loadCommands={loadCommands}
                 onNewSession={() => setNewSession(true)}
+                onOpenChat={sessionId => {
+                  setChatId(sessionId)
+                  openTab('chat')
+                }}
               />
             ) : activeTab === 'chat' ? (
               <Chat
@@ -529,7 +540,7 @@ export function App() {
                 onNewSession={() => setNewSession(true)}
               />
             ) : activeTab === 'gallery' ? (
-              <Gallery feeds={feeds} latestAt={merged.galleryLatest} now={now} />
+              <Gallery feeds={feeds} sessions={ordered} latestAt={merged.galleryLatest} now={now} tone={tone} />
             ) : activeTab === 'browser' ? (
               <BrowserTab session={current} covered={shown !== null || newSession} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} />
             ) : activeTab === 'docs' ? (

@@ -25,7 +25,9 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 
 ![Several conversations, side by side](promo/en/02-split.png)
 
-- **Chat, PC by PC.** Your PCs sit on the left as buddies of their own colour (hover for the name), then the chosen PC's sessions: open ones, ended ones under a divider, and the archive. Whole conversations come from the session transcripts. Send prompts and attach files (from the home screen too), and on a PC split the window into up to 4 conversations.
+- **PC by PC, everywhere.** Home, chat and images all start the same way. Your PCs sit on the left as buddies of their own colour (hover for the name). Next come the chosen PC's sessions: open ones, ended ones under a divider, and the archive. The view comes last.
+- **Panes like tmux.** On a PC, split home or chat into up to 6 panes, left/right or top/bottom, and split a half again. Drag the lines to resize; the layout is remembered. A home pane follows whichever session is busy until you pick one for it.
+- **Chat.** Whole conversations come from the session transcripts. Send prompts and attach files (from the home screen too). Each session keeps its own unsent draft and attachments, so you can switch sessions and come back to it.
 - **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), archive it or delete it. Ended sessions can be archived or deleted all at once.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
@@ -37,7 +39,8 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 
 ![Every image Claude saw, by project](promo/en/05-gallery.png)
 
-- **Images.** Every picture and screenshot Claude opened, grouped by project and session. GIFs play. Save them to your device, remove them or clear the list.
+- **Images.** Every picture and screenshot Claude opened, PC by PC and session by session. GIFs play. Save them to your device, remove them or clear a PC's list.
+- **Keyboard.** Ctrl+PageUp and Ctrl+PageDown move between the tabs.
 
 ![Edit CLAUDE.md and AGENTS.md in place](promo/en/06-docs.png)
 

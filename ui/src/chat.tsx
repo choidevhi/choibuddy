@@ -1,16 +1,17 @@
-import { Fragment, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { type CommandInfo, type Conversation, type HistoryEntry, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
+import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CommandInfo, type Conversation, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
-import { Buddy, type Mood, type Pose, tintFor, type Tone } from './buddy.tsx'
+import { Buddy, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
-import { ago, type MessageKey, useI18n } from './i18n.ts'
+import { type MessageKey, useI18n } from './i18n.ts'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
-import { ChevronDownIcon, ClipboardIcon, PaperclipIcon, PlusIcon, SpinnerIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
+import { ChevronDownIcon, ClipboardIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
+import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile } from './images.tsx'
-import { archiveSessions, deleteConversation, endSession, fetchConversation, fetchHistory, renameSession, type Uploaded } from './live.ts'
+import { deleteConversation, fetchConversation, type Uploaded } from './live.ts'
 import { Markdown } from './markdown.tsx'
-import { ContextMenu, type MenuEntry } from './menu.tsx'
+import { type PcEntry, useSessionNav } from './sessions.tsx'
+import { closeLeaf, forgetSession, leavesOf, MAX_TILES, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 import { Picker } from './picker.tsx'
 import { platform, readPref } from './platform.ts'
 import { useTypewriter } from './typewriter.ts'
@@ -118,6 +119,40 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
   const typing = ready && session.canCommand && query !== null && !dismissed
   const suggestions = typing && query !== null && commands?.sessionId === session.id ? suggestCommands(commands.list, query) : []
   const canClipboard = platform === 'android' && window.ChoiBuddyNative?.clipboardImage !== undefined
+  const sessionId = session?.id ?? null
+  // What the box holds and for which session, read by the handlers below.
+  const held = useRef<{ sessionId: string | null; text: string; files: Attachment[] }>({ sessionId: null, text: '', files: [] })
+
+  // Every change is kept for the session it was made in, so leaving the
+  // session loses nothing. Saved where the change happens, never from an
+  // effect that could run with an older box.
+  const keep = (text: string, list: Attachment[]): void => {
+    const owner = held.current.sessionId
+
+    held.current = { sessionId: owner, text, files: list }
+    if (owner !== null) saveDraft(owner, text, list.flatMap(file => (file.path === null || file.failed ? [] : [{ name: file.name, path: file.path }])))
+  }
+
+  const changeDraft = (text: string): void => {
+    setDraft(text)
+    keep(text, held.current.files)
+  }
+
+  const changeFiles = (list: Attachment[]): void => {
+    setFiles(list)
+    keep(held.current.text, list)
+  }
+
+  // The box belongs to the session: its words and finished uploads come back with it.
+  useEffect(() => {
+    const stored = sessionId === null ? null : readDraft(sessionId)
+    const list = (stored?.files ?? []).map(file => ({ key: crypto.randomUUID(), name: file.name, path: file.path, failed: false }))
+
+    held.current = { sessionId, text: stored?.text ?? '', files: list }
+    setDraft(stored?.text ?? '')
+    setFiles(list)
+    setDismissed(false)
+  }, [sessionId])
 
   useBackLayer(suggestions.length > 0, () => setDismissed(true))
 
@@ -137,11 +172,14 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
 
     for (const file of list) {
       const key = crypto.randomUUID()
+      const owner = held.current.sessionId
 
-      setFiles(current => [...current, { key, name: file.name === '' ? 'pasted.png' : file.name, path: null, failed: false }])
-      void onUpload(session.id, file).then(result =>
-        setFiles(current => current.map(item => (item.key === key ? { ...item, path: result?.path ?? null, failed: result === null } : item))),
-      )
+      changeFiles([...held.current.files, { key, name: file.name === '' ? 'pasted.png' : file.name, path: null, failed: false }])
+      void onUpload(session.id, file).then(result => {
+        // The box moved on to another session meanwhile.
+        if (held.current.sessionId !== owner) return
+        changeFiles(held.current.files.map(item => (item.key === key ? { ...item, path: result?.path ?? null, failed: result === null } : item)))
+      })
     }
   }
 
@@ -149,7 +187,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
   useEffect(() => {
     if (inject === null) return
 
-    setDraft(current => (current.trim() === '' ? inject.text : `${current.trimEnd()}\n\n${inject.text}`))
+    changeDraft(held.current.text.trim() === '' ? inject.text : `${held.current.text.trimEnd()}\n\n${inject.text}`)
     attach(inject.files)
     input.current?.focus()
   }, [inject?.id])
@@ -166,13 +204,18 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
 
     setSending(true)
 
-    const ok = await onSend(session.id, text, busy ? mode : undefined)
+    const owner = session.id
+    const ok = await onSend(owner, text, busy ? mode : undefined)
 
     setSending(false)
 
-    if (ok) {
+    // Sent: the session's draft is done, even when the box moved on meanwhile.
+    if (ok && held.current.sessionId !== owner) saveDraft(owner, '', [])
+
+    if (ok && held.current.sessionId === owner) {
       setDraft('')
       setFiles([])
+      keep('', [])
       setDismissed(false)
       setMode(readPref('promptMode', PROMPT_MODES, 'steer'))
       onSent?.()
@@ -180,7 +223,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
   }
 
   const complete = (command: CommandInfo): void => {
-    setDraft(`/${command.name} `)
+    changeDraft(`/${command.name} `)
     input.current?.focus()
   }
 
@@ -268,7 +311,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
             <span key={file.key} className={`chip ${file.failed ? 'chip--failed' : ''}`} title={file.failed ? t('chat.uploadFailed', { name: file.name }) : (file.path ?? file.name)}>
               {file.path === null && !file.failed ? <SpinnerIcon size={12} /> : <PaperclipIcon size={12} />}
               <span className="chip-name">{file.name}</span>
-              <button type="button" className="chip-remove" onClick={() => setFiles(current => current.filter(item => item.key !== file.key))} aria-label="×">
+              <button type="button" className="chip-remove" onClick={() => changeFiles(held.current.files.filter(item => item.key !== file.key))} aria-label="×">
                 <XIcon size={11} />
               </button>
             </span>
@@ -303,7 +346,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
           title={ready ? undefined : t('chat.noMod')}
           value={draft}
           onChange={event => {
-            setDraft(event.target.value)
+            changeDraft(event.target.value)
             if (!event.target.value.startsWith('/')) setDismissed(false)
           }}
           onKeyDown={onKey}
@@ -334,8 +377,6 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
   )
 }
 
-// A session from any PC, with the PC it lives on.
-type PcEntry = HistoryEntry & { pcKey: string; pcName: string }
 
 type PaneProps = {
   sessionId: string | null
@@ -347,8 +388,8 @@ type PaneProps = {
   tone: Tone
   now: number
   focused: boolean
-  // Several panes side by side: each gets a head with its own controls.
-  split: { canAdd: boolean; canClose: boolean; onAdd: () => void; onClose: () => void } | null
+  // Several panes on screen: each gets a head that splits or closes it.
+  tiles: { canSplit: boolean; canClose: boolean; onSplit: (dir: 'row' | 'column') => void; onClose: () => void } | null
   onFocus: () => void
   onDeleted: (sessionId: string) => void
   onSend: (sessionId: string, text: string) => Promise<boolean>
@@ -359,7 +400,7 @@ type PaneProps = {
 // One conversation: the transcript (paged), what Claude is typing, the
 // queue, slash command output, and a prompt box for that session.
 function ConversationPane(props: PaneProps) {
-  const { sessionId, entry, live, feed, stream, multiPc, tone, now, focused, split, onFocus, onDeleted, onSend, onUpload, loadCommands } = props
+  const { sessionId, entry, live, feed, stream, multiPc, tone, now, focused, tiles, onFocus, onDeleted, onSend, onUpload, loadCommands } = props
   const { t } = useI18n()
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [missing, setMissing] = useState(false)
@@ -491,8 +532,8 @@ function ConversationPane(props: PaneProps) {
   const status = live?.status ?? 'ended'
 
   return (
-    <section className={`convo-main ${split !== null ? 'pane' : ''} ${focused && split !== null ? 'pane--focused' : ''}`} onPointerDown={onFocus}>
-      {split !== null && (
+    <section className={`convo-main ${tiles !== null ? 'pane' : ''} ${focused && tiles !== null ? 'pane--focused' : ''}`} onPointerDown={onFocus}>
+      {tiles !== null && (
         <header className="pane-head">
           <span className={`status-dot dot--${entry?.live === true ? status : 'ended'}`} />
           <span className="pane-title">
@@ -504,13 +545,18 @@ function ConversationPane(props: PaneProps) {
               </span>
             )}
           </span>
-          {split.canAdd && (
-            <button type="button" className="icon-btn" onClick={split.onAdd} aria-label={t('chat.split')} title={t('chat.split')}>
-              <SplitIcon size={15} />
-            </button>
+          {tiles.canSplit && (
+            <>
+              <button type="button" className="icon-btn" onClick={() => tiles.onSplit('row')} aria-label={t('chat.split')} title={t('chat.split')}>
+                <SplitIcon size={15} />
+              </button>
+              <button type="button" className="icon-btn" onClick={() => tiles.onSplit('column')} aria-label={t('chat.splitDown')} title={t('chat.splitDown')}>
+                <SplitDownIcon size={15} />
+              </button>
+            </>
           )}
-          {split.canClose && (
-            <button type="button" className="icon-btn" onClick={split.onClose} aria-label={t('chat.closePane')} title={t('chat.closePane')}>
+          {tiles.canClose && (
+            <button type="button" className="icon-btn" onClick={tiles.onClose} aria-label={t('chat.closePane')} title={t('chat.closePane')}>
               <XIcon size={15} />
             </button>
           )}
@@ -535,7 +581,7 @@ function ConversationPane(props: PaneProps) {
         <div className="convo-content" ref={content}>
         {sessionId === null ? (
           <div className="empty">
-            <div className="empty-title">{split === null ? t('chat.empty') : t('chat.paneEmpty')}</div>
+            <div className="empty-title">{tiles === null ? t('chat.empty') : t('chat.paneEmpty')}</div>
           </div>
         ) : missing ? (
           <div className="empty">
@@ -634,7 +680,7 @@ function ConversationPane(props: PaneProps) {
             )}
           </div>
         )}
-        <Composer session={live} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact={split !== null} onSent={followBottom} />
+        <Composer session={live} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact={tiles !== null} onSent={followBottom} />
       </div>
 
       {deleting !== null && entry !== null && (
@@ -651,50 +697,8 @@ function ConversationPane(props: PaneProps) {
   )
 }
 
-const MAX_PANES = 4
-const MIN_SHARE = 0.18
-const SPLIT_KEY = 'choibuddy.chatSplit'
-// Below this width one conversation is shown at a time.
+// Panes need room: below this width only the pane in focus is drawn.
 const SPLIT_MIN_PX = 900
-
-type Split = {
-  panes: Array<string | null>
-  sizes: number[]
-}
-
-function readSplit(): Split {
-  try {
-    const parsed: Partial<Split> | null = JSON.parse(localStorage.getItem(SPLIT_KEY) ?? 'null')
-    const panes = Array.isArray(parsed?.panes) ? parsed.panes.slice(0, MAX_PANES).map(id => (typeof id === 'string' ? id : null)) : []
-    const sizes = Array.isArray(parsed?.sizes) && parsed.sizes.length === panes.length ? parsed.sizes.map(size => (typeof size === 'number' && size > 0 ? size : 1)) : panes.map(() => 1)
-
-    return panes.length === 0 ? { panes: [null], sizes: [1] } : { panes, sizes }
-  } catch {
-    return { panes: [null], sizes: [1] }
-  }
-}
-
-function saveSplit(split: Split): void {
-  try {
-    localStorage.setItem(SPLIT_KEY, JSON.stringify(split))
-  } catch {
-    // Remembering the layout is a convenience.
-  }
-}
-
-function useWide(): boolean {
-  const [wide, setWide] = useState(() => window.innerWidth >= SPLIT_MIN_PX)
-
-  useEffect(() => {
-    const onResize = (): void => setWide(window.innerWidth >= SPLIT_MIN_PX)
-
-    window.addEventListener('resize', onResize)
-
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  return wide
-}
 
 type ChatProps = {
   streams: ReadonlyMap<string, LiveStream>
@@ -711,554 +715,133 @@ type ChatProps = {
   onNewSession: () => void
 }
 
-// What the right click (or long press) opened, and where.
-type MenuState = { entry: PcEntry; at: { x: number; y: number } }
-
-// A question before ending a session or deleting conversations.
-type Asking = { kind: 'end'; entry: PcEntry } | { kind: 'delete'; entries: PcEntry[] }
-
-type Groups = { live: PcEntry[]; ended: PcEntry[]; archived: PcEntry[] }
-
-function groupsOf(entries: PcEntry[], pcKey: string | null): Groups {
-  const groups: Groups = { live: [], ended: [], archived: [] }
-
-  for (const entry of entries) {
-    if (entry.pcKey !== pcKey) continue
-    if (entry.live) groups.live.push(entry)
-    else if (entry.archived) groups.archived.push(entry)
-    else groups.ended.push(entry)
-  }
-
-  return groups
-}
-
-function pcName(feed: Feed): string {
-  return feed.snapshot?.server.hostName ?? feed.connection.baseUrl.replace(/^https?:\/\//, '')
-}
-
-// A PC's buddy shows how that PC is doing: asking, working, resting or gone.
-function pcLook(feed: Feed, sessions: PcSession[]): { pose: Pose; mood: Mood; status: string } {
-  const mine = sessions.filter(session => session.pcKey === feed.key)
-
-  if (feed.link !== 'live') return { pose: 'closed', mood: 'sleep', status: 'ended' }
-  if (mine.some(session => session.status === 'waiting')) return { pose: 'warning', mood: 'alert', status: 'waiting' }
-  if (mine.some(session => session.status === 'working' || session.status === 'thinking')) return { pose: 'think', mood: 'busy', status: 'working' }
-
-  return { pose: 'base', mood: 'calm', status: mine.length > 0 ? 'idle' : 'ended' }
-}
-
-// The connected PCs as buddies of their own colour. A PC's name shows on hover.
-function PcRail({ feeds, sessions, shown, tone, onPick }: { feeds: Feed[]; sessions: PcSession[]; shown: string | null; tone: Tone; onPick: (key: string) => void }) {
-  const { t } = useI18n()
-  // Drawn on the page itself: inside the scrolling rail it is cut off.
-  const [tip, setTip] = useState<{ name: string; top: number; left: number } | null>(null)
-
-  const showTip = (name: string, element: HTMLElement): void => {
-    const rect = element.getBoundingClientRect()
-
-    setTip({ name, top: rect.top + rect.height / 2, left: rect.right + 8 })
-  }
-
-  return (
-    <nav className="pc-rail" aria-label={t('chat.pcs')}>
-      {feeds.map(feed => {
-        const look = pcLook(feed, sessions)
-        const name = feed.local ? `${pcName(feed)} · ${t('connect.thisPc')}` : pcName(feed)
-
-        return (
-          <button
-            type="button"
-            key={feed.key}
-            className={`pc-rail-item ${feed.key === shown ? 'on' : ''}`}
-            aria-label={name}
-            onClick={() => onPick(feed.key)}
-            onMouseEnter={event => showTip(name, event.currentTarget)}
-            onMouseLeave={() => setTip(null)}
-            onFocus={event => showTip(name, event.currentTarget)}
-            onBlur={() => setTip(null)}
-          >
-            <Buddy pose={look.pose} mood={look.mood} tone={tone} tint={tintFor(feed.key)} size={30} />
-            {look.status === 'waiting' && <span className="pc-rail-badge" />}
-          </button>
-        )
-      })}
-      {tip !== null &&
-        createPortal(
-          <div className="pc-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>
-            {tip.name}
-          </div>,
-          document.body,
-        )}
-    </nav>
-  )
-}
-
-function RenameSheet({ entry, onSave, onCancel }: { entry: PcEntry; onSave: (title: string) => void; onCancel: () => void }) {
-  const { t } = useI18n()
-  const [title, setTitle] = useState(entry.title)
-
-  useBackLayer(true, onCancel)
-
-  return (
-    <div className="sheet-backdrop" onClick={onCancel}>
-      <div className="sheet confirm-sheet" role="dialog" aria-modal="true" aria-label={t('rename.title')} onClick={event => event.stopPropagation()}>
-        <div className="confirm-body">
-          <div className="sheet-title">{t('rename.title')}</div>
-          <div className="confirm-hint">{t('rename.hint')}</div>
-          <input
-            className="field"
-            autoFocus
-            value={title}
-            maxLength={120}
-            placeholder={entry.project}
-            onChange={event => setTitle(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) onSave(title)
-            }}
-          />
-        </div>
-        <footer className="sheet-actions">
-          <button type="button" className="btn btn--deny" onClick={onCancel}>
-            {t('action.cancel')}
-          </button>
-          <button type="button" className="btn btn--allow" onClick={() => onSave(title)}>
-            {t('rename.save')}
-          </button>
-        </footer>
-      </div>
-    </div>
-  )
-}
-
 // Every conversation, PC by PC: the PCs as buddies on the left, the chosen
-// PC's sessions next to them (open ones, then ended ones, then the archive),
-// and on a wide screen up to four conversations side by side, each resizable
-// and with its own prompt box. A right click (long press on a phone) on a
-// session renames, ends, archives or deletes it.
+// PC's sessions next to them, and the conversations in panes that split
+// left/right or top/bottom like tmux (on a wide screen), each with its own
+// prompt box.
 export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, tone, now, onSend, onUpload, loadCommands, onNewSession }: ChatProps) {
-  const { t } = useI18n()
-  const [history, setHistory] = useState<PcEntry[]>([])
-  const [reloadAt, setReloadAt] = useState(0)
-  const [split, setSplit] = useState<Split>(readSplit)
-  const [focus, setFocus] = useState(0)
-  const [pcKey, setPcKey] = useState<string | null>(null)
-  const [showArchive, setShowArchive] = useState(false)
-  const [menu, setMenu] = useState<MenuState | null>(null)
-  const [renaming, setRenaming] = useState<PcEntry | null>(null)
-  const [asking, setAsking] = useState<Asking | null>(null)
-  const [busy, setBusy] = useState(false)
-  const wide = useWide()
-  const row = useRef<HTMLDivElement>(null)
-  const liveIds = sessions.map(session => session.id).join(',')
-  const feedIds = feeds.map(feed => `${feed.key}#${feed.connection.token}`).join('|')
+  const [tile, setTile] = useTiles('chatTiles')
+  const [focusId, setFocusId] = useState('')
+  const wide = useWide(SPLIT_MIN_PX)
+  const leaves = leavesOf(tile)
+  const focused = leaves.find(leaf => leaf.id === focusId) ?? leaves[0]
+  const focusedId = focused?.sessionId ?? null
+  const shownIds = new Set(leaves.flatMap(leaf => (leaf.sessionId === null ? [] : [leaf.sessionId])))
 
-  // Every PC's sessions: live ones first, then the newest.
-  useEffect(() => {
-    const load = (): void => {
-      void Promise.all(
-        feeds.map(feed =>
-          fetchHistory(feed.connection).then(list => list.map((entry): PcEntry => ({ ...entry, pcKey: feed.key, pcName: feed.snapshot?.server.hostName ?? '' }))),
-        ),
-      ).then(lists => {
-        const seen = new Set<string>()
-        const merged = lists.flat().filter(entry => {
-          if (seen.has(entry.sessionId)) return false
-          seen.add(entry.sessionId)
+  const pick = (entry: PcEntry): void => onSelect(entry.sessionId, entry.live)
 
-          return true
-        })
-
-        setHistory(merged.sort((a, b) => Number(b.live) - Number(a.live) || b.updatedAt - a.updatedAt))
-      })
-    }
-
-    load()
-
-    const timer = window.setInterval(load, 30_000)
-
-    return () => window.clearInterval(timer)
-    // feedIds and liveIds stand for the feeds and sessions that matter here.
-  }, [feedIds, liveIds, reloadAt])
-
-  useEffect(() => saveSplit(split), [split])
-
-  const focusIndex = Math.min(focus, split.panes.length - 1)
-  // On a narrow screen only the pane in focus is drawn.
-  const visible = wide ? split.panes.map((sessionId, index) => ({ sessionId, index })) : [{ sessionId: split.panes[focusIndex] ?? null, index: focusIndex }]
-  const focusedId = split.panes[focusIndex] ?? null
+  const nav = useSessionNav({
+    feeds,
+    sessions,
+    tone,
+    now,
+    focusedId,
+    shownIds,
+    onPick: pick,
+    onNewSession,
+    onDeleted: sessionId => setTile(current => forgetSession(current, sessionId)),
+  })
 
   // The list (and the app) picks what the pane in focus shows; a session
   // already open in another pane moves the focus there instead.
   useEffect(() => {
     if (selectedId === null || focusedId === selectedId) return
 
-    const at = split.panes.indexOf(selectedId)
+    const at = leaves.find(leaf => leaf.sessionId === selectedId)
 
-    if (at !== -1) {
-      setFocus(at)
+    if (at !== undefined) {
+      setFocusId(at.id)
 
       return
     }
 
-    setSplit(current => ({ ...current, panes: current.panes.map((id, index) => (index === focusIndex ? selectedId : id)) }))
-  }, [selectedId, focusIndex])
+    if (focused !== undefined) setTile(current => setLeafSession(current, focused.id, selectedId))
+  }, [selectedId, focused?.id])
 
-  const entries: PcEntry[] =
-    history.length > 0
-      ? history
-      : sessions.map(session => ({
-          sessionId: session.id,
-          project: session.name,
-          cwd: session.cwd,
-          title: '',
-          updatedAt: session.updatedAt,
-          live: true,
-          archived: false,
-          pcKey: session.pcKey,
-          pcName: session.pcName,
-        }))
+  const focusLeaf = (leaf: TileLeaf): void => {
+    setFocusId(leaf.id)
 
-  const entryOf = (sessionId: string | null): PcEntry | null => (sessionId === null ? null : (entries.find(entry => entry.sessionId === sessionId) ?? null))
-  const focusedPc = entryOf(focusedId)?.pcKey ?? null
-
-  // The list follows the PC of the conversation in focus (picked here or on the home screen).
-  useEffect(() => {
-    if (focusedPc !== null) setPcKey(focusedPc)
-  }, [focusedPc])
-
-  const shownPc = pcKey !== null && feeds.some(feed => feed.key === pcKey) ? pcKey : (focusedPc ?? feeds[0]?.key ?? null)
-  const shownFeed = feeds.find(feed => feed.key === shownPc) ?? null
-  const groups = groupsOf(entries, shownPc)
-  const statusOf = (entry: PcEntry): string => (entry.live ? (sessions.find(session => session.id === entry.sessionId)?.status ?? 'ended') : 'ended')
-
-  const pick = (entry: PcEntry): void => onSelect(entry.sessionId, entry.live)
-
-  const focusPane = (index: number): void => {
-    setFocus(index)
-
-    const entry = entryOf(split.panes[index] ?? null)
+    const entry = nav.entryOf(leaf.sessionId)
 
     if (entry !== null && entry.sessionId !== selectedId) pick(entry)
   }
 
-  const addPane = (): void => {
-    const shownIds = new Set(split.panes)
-    const next = entries.find(entry => !shownIds.has(entry.sessionId)) ?? null
+  // The new pane shows a session not on screen yet.
+  const split = (leafId: string, dir: 'row' | 'column'): void => {
+    if (leaves.length >= MAX_TILES) return
 
-    setSplit(current => ({ panes: [...current.panes, next?.sessionId ?? null], sizes: current.panes.map(() => 1).concat(1) }))
-    setFocus(split.panes.length)
+    const next = nav.entries.find(entry => !shownIds.has(entry.sessionId)) ?? null
+    const result = splitLeaf(tile, leafId, dir, next?.sessionId ?? null)
+
+    setTile(() => result.tree)
+    setFocusId(result.id)
     if (next !== null) pick(next)
   }
 
-  const closePane = (index: number): void => {
-    const panesLeft = split.panes.filter((_, at) => at !== index)
-    const sizesLeft = split.sizes.filter((_, at) => at !== index)
-    const nextFocus = Math.min(index === focusIndex ? Math.max(0, index - 1) : focusIndex > index ? focusIndex - 1 : focusIndex, panesLeft.length - 1)
+  const close = (leafId: string): void => {
+    const rest = closeLeaf(tile, leafId)
+    const first = leavesOf(rest)[0]
 
-    setSplit({ panes: panesLeft, sizes: sizesLeft })
-    setFocus(nextFocus)
-
-    const entry = entryOf(panesLeft[nextFocus] ?? null)
-
-    if (entry !== null) pick(entry)
+    setTile(() => rest)
+    if (first !== undefined) focusLeaf(first)
   }
-
-  const onDeleted = (sessionId: string): void => {
-    setHistory(list => list.filter(entry => entry.sessionId !== sessionId))
-    setSplit(current => ({ ...current, panes: current.panes.map(id => (id === sessionId ? null : id)) }))
-  }
-
-  const connectionOf = (entry: PcEntry) => feedFor(feeds, entry.pcKey)?.connection ?? null
-
-  const archive = async (list: PcEntry[], archived: boolean): Promise<void> => {
-    const connection = list[0] === undefined ? null : connectionOf(list[0])
-
-    if (connection === null) return
-
-    const ids = new Set(list.map(entry => entry.sessionId))
-    const ok = await archiveSessions(connection, [...ids], archived)
-
-    if (!ok) {
-      showToast(t('chat.actionFailed'))
-
-      return
-    }
-
-    setHistory(current => current.map(entry => (ids.has(entry.sessionId) ? { ...entry, archived } : entry)))
-    showToast(archived ? t('chat.archivedToast', { n: ids.size }) : t('chat.unarchivedToast', { n: ids.size }))
-  }
-
-  const rename = async (entry: PcEntry, title: string): Promise<void> => {
-    const connection = connectionOf(entry)
-
-    setRenaming(null)
-
-    if (connection === null || !(await renameSession(connection, entry.sessionId, title))) {
-      showToast(t('chat.actionFailed'))
-
-      return
-    }
-
-    // An empty name goes back to Claude Code's, which the list reads again.
-    if (title.trim() === '') setReloadAt(Date.now())
-    else setHistory(current => current.map(item => (item.sessionId === entry.sessionId ? { ...item, title: title.replace(/\s+/g, ' ').trim() } : item)))
-  }
-
-  const end = async (entry: PcEntry): Promise<void> => {
-    const connection = connectionOf(entry)
-    const result = connection === null ? 'failed' : await endSession(connection, entry.sessionId)
-
-    showToast(result === 'sent' ? t('chat.endSent') : result === 'no-mod' ? t('chat.endNoMod') : t('chat.actionFailed'))
-  }
-
-  const remove = async (list: PcEntry[]): Promise<void> => {
-    let failed = 0
-
-    for (const entry of list) {
-      const connection = connectionOf(entry)
-      const result = connection === null ? 'failed' : await deleteConversation(connection, entry.sessionId)
-
-      if (result === 'deleted') onDeleted(entry.sessionId)
-      else failed += 1
-    }
-
-    if (failed > 0) showToast(t('chat.actionFailed'))
-  }
-
-  const menuItems = (entry: PcEntry): Array<MenuEntry | null> => {
-    const renameItem: MenuEntry = { label: t('menu.rename'), onSelect: () => setRenaming(entry) }
-
-    if (entry.live) {
-      const canEnd = sessions.find(session => session.id === entry.sessionId)?.canPrompt === true
-
-      return [renameItem, null, { label: t('menu.end'), danger: true, disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => setAsking({ kind: 'end', entry }) }]
-    }
-
-    const ended = groupsOf(entries, entry.pcKey).ended
-
-    return [
-      renameItem,
-      { label: entry.archived ? t('menu.unarchive') : t('menu.archive'), onSelect: () => void archive([entry], !entry.archived) },
-      { label: t('menu.delete'), danger: true, onSelect: () => setAsking({ kind: 'delete', entries: [entry] }) },
-      null,
-      { label: t('chat.archiveEnded', { n: ended.length }), disabled: ended.length === 0, onSelect: () => void archive(ended, true) },
-      { label: t('chat.deleteEnded', { n: ended.length }), danger: true, disabled: ended.length === 0, onSelect: () => setAsking({ kind: 'delete', entries: ended }) },
-    ]
-  }
-
-  const openMenu = (entry: PcEntry, at: { x: number; y: number }): void => setMenu({ entry, at })
-
-  // Dragging the line between two panes moves their shares of the width.
-  const resize = (index: number, start: { clientX: number }): void => {
-    const element = row.current
-
-    if (element === null) return
-
-    const width = element.getBoundingClientRect().width
-    const total = split.sizes.reduce((sum, size) => sum + size, 0)
-    const startX = start.clientX
-    const first = split.sizes[index] ?? 1
-    const second = split.sizes[index + 1] ?? 1
-
-    const move = (event: PointerEvent): void => {
-      const delta = ((event.clientX - startX) / width) * total
-      const floor = MIN_SHARE * total
-      const a = Math.min(first + second - floor, Math.max(floor, first + delta))
-
-      setSplit(current => ({ ...current, sizes: current.sizes.map((size, at) => (at === index ? a : at === index + 1 ? first + second - a : size)) }))
-    }
-
-    const up = (): void => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      document.body.classList.remove('resizing')
-    }
-
-    document.body.classList.add('resizing')
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
-  const shownIds = new Set(split.panes)
-  const titleOf = (entry: PcEntry): string => (entry.title === '' ? t('chat.untitled') : entry.title)
-  const metaOf = (entry: PcEntry): string => `${entry.project} · ${entry.live ? t('chat.live') : ago(t, now - entry.updatedAt)}`
-
-  const sessionRow = (entry: PcEntry) => (
-    <button
-      type="button"
-      key={entry.sessionId}
-      className={`convo-item ${entry.sessionId === focusedId ? 'on' : shownIds.has(entry.sessionId) ? 'shown' : ''} ${entry.live ? '' : 'convo-item--ended'}`}
-      onClick={() => pick(entry)}
-      onContextMenu={event => {
-        event.preventDefault()
-        openMenu(entry, { x: event.clientX, y: event.clientY })
-      }}
-    >
-      <span className={`status-dot convo-dot dot--${statusOf(entry)}`} />
-      <span className="convo-item-text">
-        <span className="convo-title">{titleOf(entry)}</span>
-        <span className="convo-meta">{metaOf(entry)}</span>
-      </span>
-    </button>
-  )
-
-  const pickerOption = (entry: PcEntry, group: string) => ({ value: entry.sessionId, label: titleOf(entry), hint: metaOf(entry), dot: `dot--${statusOf(entry)}`, group })
 
   return (
     <div className="convo convo--chat">
-      <PcRail feeds={feeds} sessions={sessions} shown={shownPc} tone={tone} onPick={setPcKey} />
-
-      <aside className="convo-list">
-        <div className="section-label convo-list-head">
-          <span className="convo-list-pc">{shownFeed === null ? t('chat.sessions') : pcName(shownFeed)}</span>
-          <button type="button" className="btn small" onClick={onNewSession} title={t('newSession.title')}>
-            <PlusIcon size={13} /> {t('chat.newSession')}
-          </button>
-        </div>
-        {groups.live.map(sessionRow)}
-        {groups.live.length === 0 && <div className="convo-none">{t('chat.noOpen')}</div>}
-        {groups.ended.length > 0 && (
-          <div className="convo-divider">
-            <span className="convo-divider-label">
-              {t('chat.groupEnded')} · {groups.ended.length}
-            </span>
-            <button type="button" className="link-btn" onClick={() => void archive(groups.ended, true)}>
-              {t('chat.archiveAll')}
-            </button>
-            <button type="button" className="link-btn link-btn--danger" onClick={() => setAsking({ kind: 'delete', entries: groups.ended })}>
-              {t('chat.deleteAll')}
-            </button>
-          </div>
-        )}
-        {groups.ended.map(sessionRow)}
-        {groups.archived.length > 0 && (
-          <button type="button" className="convo-divider convo-archive-toggle" onClick={() => setShowArchive(!showArchive)} aria-expanded={showArchive}>
-            <span className="convo-divider-label">
-              {t('chat.groupArchived')} · {groups.archived.length}
-            </span>
-            <span className="picker-caret">{showArchive ? '▾' : '▸'}</span>
-          </button>
-        )}
-        {showArchive && groups.archived.map(sessionRow)}
-      </aside>
+      {nav.rail}
+      {nav.list}
 
       <div className="convo-panes">
-        <div className="convo-select-row">
-          {feeds.length > 1 && (
-            <div className="pc-chips" role="tablist" aria-label={t('chat.pcs')}>
-              {feeds.map(feed => {
-                const look = pcLook(feed, sessions)
+        {nav.phoneRow}
 
-                return (
-                  <button
-                    type="button"
-                    role="tab"
-                    key={feed.key}
-                    aria-selected={feed.key === shownPc}
-                    aria-label={pcName(feed)}
-                    title={pcName(feed)}
-                    className={`pc-chip ${feed.key === shownPc ? 'on' : ''}`}
-                    onClick={() => setPcKey(feed.key)}
-                  >
-                    <Buddy pose={look.pose} mood={look.mood} tone={tone} tint={tintFor(feed.key)} size={24} />
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          <Picker
-            className="convo-select"
-            value={focusedId}
-            title={shownFeed === null ? t('chat.sessions') : pcName(shownFeed)}
-            placeholder={t('chat.empty')}
-            options={[
-              ...groups.live.map(entry => pickerOption(entry, t('chat.groupLive'))),
-              ...groups.ended.map(entry => pickerOption(entry, t('chat.groupEnded'))),
-              ...groups.archived.map(entry => pickerOption(entry, t('chat.groupArchived'))),
-            ]}
-            onChange={sessionId => {
-              const entry = entries.find(item => item.sessionId === sessionId)
+        <div className="pane-row">
+          <TileView
+            tile={tile}
+            wide={wide}
+            focusedId={focused?.id ?? ''}
+            onChange={setTile}
+            render={leaf => {
+              const entry = nav.entryOf(leaf.sessionId)
+              const live = sessions.find(session => session.id === leaf.sessionId) ?? null
+              const feed = feedFor(feeds, live?.pcKey ?? entry?.pcKey)
 
-              if (entry !== undefined) pick(entry)
-            }}
-            onOptionMenu={(sessionId, at) => {
-              const entry = entries.find(item => item.sessionId === sessionId)
-
-              if (entry !== undefined) openMenu(entry, at)
+              return (
+                <ConversationPane
+                  key={leaf.id}
+                  sessionId={leaf.sessionId}
+                  entry={entry}
+                  live={live}
+                  feed={feed}
+                  stream={leaf.sessionId === null ? undefined : streams.get(leaf.sessionId)}
+                  multiPc={multiPc}
+                  tone={tone}
+                  now={now}
+                  focused={leaf.id === focused?.id}
+                  tiles={
+                    wide
+                      ? {
+                          canSplit: leaves.length < MAX_TILES,
+                          canClose: leaves.length > 1,
+                          onSplit: dir => split(leaf.id, dir),
+                          onClose: () => close(leaf.id),
+                        }
+                      : null
+                  }
+                  onFocus={() => {
+                    if (leaf.id !== focused?.id) focusLeaf(leaf)
+                  }}
+                  onDeleted={sessionId => setTile(current => forgetSession(current, sessionId))}
+                  onSend={onSend}
+                  onUpload={onUpload}
+                  loadCommands={loadCommands}
+                />
+              )
             }}
           />
-          <button type="button" className="icon-btn convo-new" onClick={onNewSession} title={t('newSession.title')}>
-            <PlusIcon size={17} />
-          </button>
-        </div>
-
-        <div className="pane-row" ref={row}>
-          {visible.map(({ sessionId, index }) => {
-            const entry = entryOf(sessionId)
-            const live = sessions.find(session => session.id === sessionId) ?? null
-            const feed = feedFor(feeds, live?.pcKey ?? entry?.pcKey)
-
-            return (
-              <Fragment key={`${index}-${split.panes.length}`}>
-                {wide && index > 0 && <div className="pane-divider" role="separator" aria-orientation="vertical" onPointerDown={event => resize(index - 1, event)} />}
-                <div className="pane-slot" style={{ flexGrow: wide ? (split.sizes[index] ?? 1) : 1 }}>
-                  <ConversationPane
-                    sessionId={sessionId}
-                    entry={entry}
-                    live={live}
-                    feed={feed}
-                    stream={sessionId === null ? undefined : streams.get(sessionId)}
-                    multiPc={multiPc}
-                    tone={tone}
-                    now={now}
-                    focused={index === focusIndex}
-                    split={
-                      wide
-                        ? {
-                            canAdd: split.panes.length < MAX_PANES,
-                            canClose: split.panes.length > 1,
-                            onAdd: addPane,
-                            onClose: () => closePane(index),
-                          }
-                        : null
-                    }
-                    onFocus={() => {
-                      if (index !== focusIndex) focusPane(index)
-                    }}
-                    onDeleted={onDeleted}
-                    onSend={onSend}
-                    onUpload={onUpload}
-                    loadCommands={loadCommands}
-                  />
-                </div>
-              </Fragment>
-            )
-          })}
         </div>
       </div>
 
-      {menu !== null && <ContextMenu at={menu.at} title={titleOf(menu.entry)} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
-
-      {renaming !== null && <RenameSheet entry={renaming} onSave={title => void rename(renaming, title)} onCancel={() => setRenaming(null)} />}
-
-      {asking !== null && (
-        <ConfirmSheet
-          title={asking.kind === 'end' ? t('chat.endTitle') : asking.entries.length === 1 ? t('chat.deleteTitle') : t('chat.deleteManyTitle', { n: asking.entries.length })}
-          hint={asking.kind === 'end' ? `${titleOf(asking.entry)}\n\n${t('chat.endHint')}` : t('chat.deleteHint')}
-          confirmLabel={asking.kind === 'end' ? t('chat.endConfirm') : t('action.delete')}
-          busy={busy}
-          onConfirm={() => {
-            const current = asking
-
-            setBusy(true)
-            void (current.kind === 'end' ? end(current.entry) : remove(current.entries)).finally(() => {
-              setBusy(false)
-              setAsking(null)
-            })
-          }}
-          onCancel={() => setAsking(null)}
-        />
-      )}
+      {nav.overlays}
     </div>
   )
 }

@@ -1,41 +1,22 @@
 import { useEffect, useState } from 'react'
 import type { GalleryImage } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
+import type { Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
-import { type Feed, feedFor } from './feeds.ts'
+import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { ago, useI18n } from './i18n.ts'
 import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, ImageIcon, TrashIcon, XIcon } from './icons.tsx'
 import { RemoteImage, saveImage } from './images.tsx'
 import { clearGallery, deleteImage, fetchGallery, fetchHistory } from './live.ts'
+import { Picker } from './picker.tsx'
 import { platform } from './platform.ts'
+import { PcChips, pcName, PcRail } from './sessions.tsx'
 
 type PcImage = GalleryImage & { pcKey: string }
 
 const ALL = ''
 
-// A project is a folder on one PC (the gallery keeps the folder's name).
-function projectKey(image: PcImage): string {
-  return `${image.pcKey}|${image.sessionName}`
-}
-
-type Project = { key: string; name: string; count: number }
-
 type Group = { sessionId: string; pcKey: string; project: string; latestAt: number; images: PcImage[] }
-
-// Projects, busiest-latest first, from images that are already newest first.
-export function projectsOf(images: PcImage[]): Project[] {
-  const byKey = new Map<string, Project>()
-
-  for (const image of images) {
-    const key = projectKey(image)
-    const project = byKey.get(key)
-
-    if (project === undefined) byKey.set(key, { key, name: image.sessionName, count: 1 })
-    else project.count += 1
-  }
-
-  return [...byKey.values()]
-}
 
 // One group per session, in the order their newest picture came.
 export function groupsOf(images: PcImage[]): Group[] {
@@ -54,16 +35,19 @@ export function groupsOf(images: PcImage[]): Group[] {
 
 type Confirm = { kind: 'clear' } | { kind: 'image' } | { kind: 'session'; group: Group }
 
-// Every picture Claude looked at, on every PC, newest first, by project and
-// then by session; opens into a viewer that pages through the pictures shown
-// (← → on a keyboard). Pictures can be saved to this device, taken off the
-// list one by one or a session at a time, or the list emptied; files Claude
-// read are never deleted from the PC.
-export function Gallery({ feeds, latestAt, now }: { feeds: Feed[]; latestAt: number; now: number }) {
+type GalleryProps = { feeds: Feed[]; sessions: PcSession[]; latestAt: number; now: number; tone: Tone }
+
+// Every picture Claude looked at, PC by PC: the PCs as buddies, the chosen
+// PC's sessions that have pictures, then the pictures. Opens into a viewer
+// that pages through them (← → on a keyboard). Pictures can be saved to
+// this device, taken off the list one by one or a session at a time, or the
+// PC's list emptied; files Claude read are never deleted from the PC.
+export function Gallery({ feeds, sessions, latestAt, now, tone }: GalleryProps) {
   const { t } = useI18n()
   const [images, setImages] = useState<PcImage[]>([])
   const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map())
-  const [project, setProject] = useState(ALL)
+  const [pcKey, setPcKey] = useState<string | null>(null)
+  const [chosen, setChosen] = useState(ALL)
   const [open, setOpen] = useState<number | null>(null)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [busy, setBusy] = useState(false)
@@ -91,12 +75,16 @@ export function Gallery({ feeds, latestAt, now }: { feeds: Feed[]; latestAt: num
     })
   }, [feedIds])
 
-  const projects = projectsOf(images)
-  const chosen = projects.some(item => item.key === project) ? project : ALL
-  const groups = groupsOf(chosen === ALL ? images : images.filter(image => projectKey(image) === chosen))
+  // The first PC with pictures, until another is picked.
+  const shownPc = pcKey !== null && feeds.some(feed => feed.key === pcKey) ? pcKey : (images[0]?.pcKey ?? feeds[0]?.key ?? null)
+  const shownFeed = feeds.find(feed => feed.key === shownPc) ?? null
+  const pcGroups = groupsOf(images.filter(image => image.pcKey === shownPc))
+  const choice = chosen === ALL || pcGroups.some(group => group.sessionId === chosen) ? chosen : ALL
+  const groups = choice === ALL ? pcGroups : pcGroups.filter(group => group.sessionId === choice)
   // The viewer pages through the pictures in the order they are drawn.
   const shownImages = groups.flatMap(group => group.images)
   const shown = open === null ? undefined : shownImages[open]
+  const pcCount = pcGroups.reduce((sum, group) => sum + group.images.length, 0)
   // Where each group's pictures start in that order.
   const starts: number[] = []
   let offset = 0
@@ -107,6 +95,13 @@ export function Gallery({ feeds, latestAt, now }: { feeds: Feed[]; latestAt: num
   }
 
   const connectionOf = (image: PcImage) => feedFor(feeds, image.pcKey)?.connection ?? null
+  const titleOf = (group: Group): string => titles.get(group.sessionId) ?? t('gallery.session', { id: group.sessionId.slice(0, 8) })
+
+  const pickPc = (key: string): void => {
+    setPcKey(key)
+    setChosen(ALL)
+    setOpen(null)
+  }
 
   useBackLayer(open !== null, () => setOpen(null))
 
@@ -153,8 +148,8 @@ export function Gallery({ feeds, latestAt, now }: { feeds: Feed[]; latestAt: num
     setBusy(true)
 
     if (confirm.kind === 'clear') {
-      await Promise.all(feeds.map(feed => clearGallery(feed.connection)))
-      setImages([])
+      if (shownFeed !== null) await clearGallery(shownFeed.connection)
+      setImages(list => list.filter(item => item.pcKey !== shownPc))
       setOpen(null)
     } else {
       const target = confirm.kind === 'session' ? confirm.group.images : shown === undefined ? [] : [shown]
@@ -176,42 +171,80 @@ export function Gallery({ feeds, latestAt, now }: { feeds: Feed[]; latestAt: num
     return { title: shown?.name ?? '', hint: t('gallery.deleteHint'), label: t('action.delete') }
   }
 
-  return (
-    <div className="gallery">
-      {images.length === 0 ? (
-        <div className="empty">
-          <ImageIcon size={28} className="dim" />
-          <div className="empty-title">{t('gallery.empty')}</div>
-          <div className="empty-sub">{t('gallery.emptySub')}</div>
-        </div>
-      ) : (
-        <>
-          <div className="gallery-bar">
-            <div className="gallery-projects" role="tablist">
-              <button type="button" role="tab" aria-selected={chosen === ALL} className={`gallery-project ${chosen === ALL ? 'on' : ''}`} onClick={() => setProject(ALL)}>
-                {t('gallery.all')} <span className="gallery-project-count">{images.length}</span>
-              </button>
-              {projects.map(item => (
-                <button type="button" role="tab" aria-selected={chosen === item.key} key={item.key} className={`gallery-project ${chosen === item.key ? 'on' : ''}`} onClick={() => setProject(item.key)}>
-                  {item.name} <span className="gallery-project-count">{item.count}</span>
-                </button>
-              ))}
-            </div>
-            <button type="button" className="btn small" onClick={() => setConfirm({ kind: 'clear' })}>
-              <TrashIcon size={14} /> {t('gallery.clear')}
-            </button>
-          </div>
+  const choose = (sessionId: string): void => {
+    setChosen(sessionId)
+    setOpen(null)
+  }
 
-          {groups.map((group, groupIndex) => {
+  return (
+    <div className="convo convo--chat convo--gallery">
+      <PcRail feeds={feeds} sessions={sessions} shown={shownPc} tone={tone} onPick={pickPc} />
+
+      <aside className="convo-list">
+        <div className="section-label convo-list-head">
+          <span className="convo-list-pc">{shownFeed === null ? t('tab.gallery') : pcName(shownFeed)}</span>
+          {pcCount > 0 && (
+            <button type="button" className="btn small" onClick={() => setConfirm({ kind: 'clear' })}>
+              <TrashIcon size={13} /> {t('gallery.clear')}
+            </button>
+          )}
+        </div>
+        <button type="button" className={`convo-item ${choice === ALL ? 'on' : ''}`} onClick={() => choose(ALL)}>
+          <ImageIcon size={15} className="convo-dot-icon" />
+          <span className="convo-item-text">
+            <span className="convo-title">{t('gallery.all')}</span>
+            <span className="convo-meta">{t('gallery.count', { n: pcCount })}</span>
+          </span>
+        </button>
+        {pcGroups.map(group => (
+          <button
+            type="button"
+            key={`${group.pcKey}|${group.sessionId}`}
+            className={`convo-item ${choice === group.sessionId ? 'on' : ''}`}
+            onClick={() => choose(group.sessionId)}
+          >
+            <span className="status-dot convo-dot dot--ended" />
+            <span className="convo-item-text">
+              <span className="convo-title">{titleOf(group)}</span>
+              <span className="convo-meta">
+                {group.project} · {t('gallery.count', { n: group.images.length })} · {ago(t, now - group.latestAt)}
+              </span>
+            </span>
+          </button>
+        ))}
+      </aside>
+
+      <div className="gallery">
+        <div className="convo-select-row">
+          <PcChips feeds={feeds} sessions={sessions} shown={shownPc} tone={tone} onPick={pickPc} />
+          <Picker
+            className="convo-select"
+            value={choice}
+            title={shownFeed === null ? t('tab.gallery') : pcName(shownFeed)}
+            options={[
+              { value: ALL, label: t('gallery.all'), hint: t('gallery.count', { n: pcCount }) },
+              ...pcGroups.map(group => ({ value: group.sessionId, label: titleOf(group), hint: `${group.project} · ${t('gallery.count', { n: group.images.length })}` })),
+            ]}
+            onChange={choose}
+          />
+        </div>
+
+        {groups.length === 0 ? (
+          <div className="empty">
+            <ImageIcon size={28} className="dim" />
+            <div className="empty-title">{t('gallery.empty')}</div>
+            <div className="empty-sub">{t('gallery.emptySub')}</div>
+          </div>
+        ) : (
+          groups.map((group, groupIndex) => {
             const first = starts[groupIndex] ?? 0
 
             return (
               <section className="gallery-group" key={`${group.pcKey}|${group.sessionId}`}>
                 <header className="gallery-group-head">
-                  <span className="gallery-group-title">{titles.get(group.sessionId) ?? t('gallery.session', { id: group.sessionId.slice(0, 8) })}</span>
+                  <span className="gallery-group-title">{titleOf(group)}</span>
                   <span className="gallery-group-meta">
-                    {chosen === ALL && `${group.project} · `}
-                    {t('gallery.count', { n: group.images.length })} · {ago(t, now - group.latestAt)}
+                    {group.project} · {t('gallery.count', { n: group.images.length })} · {ago(t, now - group.latestAt)}
                   </span>
                   <button type="button" className="icon-btn" onClick={() => setConfirm({ kind: 'session', group })} title={t('gallery.deleteSession')} aria-label={t('gallery.deleteSession')}>
                     <TrashIcon size={14} />
@@ -232,9 +265,9 @@ export function Gallery({ feeds, latestAt, now }: { feeds: Feed[]; latestAt: num
                 </div>
               </section>
             )
-          })}
-        </>
-      )}
+          })
+        )}
+      </div>
 
       {shown !== undefined && open !== null && (
         <div className="viewer" role="dialog" aria-modal="true" aria-label={shown.name}>
