@@ -19,6 +19,7 @@ import { Picker } from './picker.tsx'
 import { hasBrowser as browserAvailable, platform, readPref } from './platform.ts'
 import { askStop } from './stop.ts'
 import { useTypewriter } from './typewriter.ts'
+import { ZoomView } from './zoom.tsx'
 
 const PAGE = 150
 
@@ -970,7 +971,9 @@ function ConversationPane(props: PaneProps) {
             </button>
           </div>
           <div className="viewer-body">
-            <RemoteImage key={viewing.id} connection={feed?.connection ?? null} id={viewing.id} alt={viewing.name} retry />
+            <ZoomView key={viewing.id}>
+              <RemoteImage connection={feed?.connection ?? null} id={viewing.id} alt={viewing.name} retry />
+            </ZoomView>
           </div>
         </div>
       )}

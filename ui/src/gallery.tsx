@@ -11,6 +11,7 @@ import { clearGallery, deleteImage, fetchGallery, fetchHistory } from './live.ts
 import { Picker } from './picker.tsx'
 import { platform } from './platform.ts'
 import { PcChips, pcName, PcRail } from './sessions.tsx'
+import { ZoomView } from './zoom.tsx'
 
 type PcImage = GalleryImage & { pcKey: string }
 
@@ -289,7 +290,9 @@ export function Gallery({ feeds, sessions, latestAt, now, tone }: GalleryProps) 
             </button>
           </div>
           <div className="viewer-body">
-            <RemoteImage key={`${shown.pcKey}-${shown.id}`} connection={connectionOf(shown)} id={shown.id} alt={shown.name} retry />
+            <ZoomView key={`${shown.pcKey}-${shown.id}`}>
+              <RemoteImage connection={connectionOf(shown)} id={shown.id} alt={shown.name} retry />
+            </ZoomView>
           </div>
           {open > 0 && (
             <button type="button" className="edge edge--left" onClick={() => setOpen(open - 1)}>
