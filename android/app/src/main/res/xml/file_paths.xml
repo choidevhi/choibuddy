@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileChooser가 카메라 촬영 결과를 받는 곳(cacheDir/camera). -->
+<paths>
+    <cache-path
+        name="camera"
+        path="camera/" />
+</paths>

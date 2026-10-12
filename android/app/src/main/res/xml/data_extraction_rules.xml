@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 연결 토큰은 이 폰에서만 쓴다. 새 폰으로 옮기거나 클라우드에 백업하지 않는다(새 폰은 QR로 다시 연결). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="choibuddy.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="choibuddy.xml" />
+    </device-transfer>
+</data-extraction-rules>

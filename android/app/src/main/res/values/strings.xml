@@ -1,0 +1,89 @@
+<resources>
+    <string name="app_name" translatable="false">ChoiBuddy</string>
+
+    <string name="channel_status">Connection status</string>
+    <string name="channel_status_description">Shows whether this phone is connected to your PC</string>
+    <string name="channel_pending">Approval requests</string>
+    <string name="channel_pending_description">When Claude Code asks for a permission, an answer or a plan approval</string>
+    <string name="channel_finished">Task alerts</string>
+    <string name="channel_finished_description">When a session finishes or stops on an error</string>
+
+    <string name="status_one_pc">Connected to PC</string>
+    <plurals name="status_pcs">
+        <item quantity="one">Connected to %d PC</item>
+        <item quantity="other">Connected to %d PCs</item>
+    </plurals>
+    <plurals name="status_sessions">
+        <item quantity="one">%d session</item>
+        <item quantity="other">%d sessions</item>
+    </plurals>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_rejected_host">%1$s: pairing code does not match</string>
+
+    <string name="action_allow">Allow</string>
+    <string name="action_deny">Deny</string>
+    <string name="action_open">Open</string>
+    <string name="send_failed">Send failed · %1$s</string>
+
+    <string name="notice_permission">Permission request</string>
+    <string name="notice_question">Claude asks</string>
+    <string name="notice_plan">Plan approval</string>
+    <string name="notice_finished">Finished</string>
+    <string name="notice_error">Stopped on an error</string>
+    <string name="notice_pick_answer">Pick an answer</string>
+    <string name="notice_approve_plan">Approve this plan?</string>
+    <string name="notice_finished_task">Finished the task</string>
+
+    <string name="tool_run_command">Run command</string>
+    <string name="tool_edit_file">Edit file</string>
+    <string name="tool_read_file">Read file</string>
+    <string name="tool_open_web">Open web page</string>
+    <string name="tool_mcp" translatable="false">MCP</string>
+    <string name="tool_use">Use %1$s</string>
+
+    <string name="toast_invalid_pairing">This isn\'t a valid pairing code</string>
+    <string name="toast_scanner_unavailable">Can\'t open the QR scanner</string>
+    <string name="image_saved">Saved to Photos</string>
+    <string name="image_save_failed">Could not save</string>
+
+    <string name="pair_dialog_title">Pair with this PC?</string>
+    <string name="pair_dialog_confirm">Pair</string>
+    <string name="pair_dialog_cancel">Cancel</string>
+
+    <string name="attach_files">Choose files</string>
+    <string name="attach_photo">Take a photo</string>
+
+    <!-- 홈 화면 위젯. 상태 문구는 앱 UI의 look.* 문구와 같다. -->
+    <string name="widget_label" translatable="false">ChoiBuddy</string>
+    <string name="widget_description">See what Claude Code is doing, right on your home screen</string>
+    <string name="widget_offline_hint">Tap to open the app and reconnect</string>
+    <string name="widget_resting_hint">No session running</string>
+    <string name="widget_five_hour">5h</string>
+    <string name="widget_weekly">Week</string>
+    <string name="widget_preview_activity" translatable="false">Bash · npm test</string>
+    <string name="widget_preview_other" translatable="false">shop-web</string>
+    <string name="widget_preview_time" translatable="false">3:15</string>
+    <string name="widget_look_think">Thinking</string>
+    <string name="widget_look_read">Reading</string>
+    <string name="widget_look_edit">Editing</string>
+    <string name="widget_look_write">Writing</string>
+    <string name="widget_look_bash">Running a command</string>
+    <string name="widget_look_search">Searching</string>
+    <string name="widget_look_web">Browsing</string>
+    <string name="widget_look_agent">Working with agents</string>
+    <string name="widget_look_todo">Planning tasks</string>
+    <string name="widget_look_question">Asking you</string>
+    <string name="widget_look_plan">Making a plan</string>
+    <string name="widget_look_mcp">Using a tool</string>
+    <string name="widget_look_warning">Waiting for approval</string>
+    <string name="widget_look_failed">Oops, that failed</string>
+    <string name="widget_look_done">Done</string>
+    <string name="widget_look_dizzy">Stopped on an error</string>
+    <string name="widget_look_closed">Session ended</string>
+    <string name="widget_look_base">Idle</string>
+    <string name="widget_look_coffee">Taking a break</string>
+    <string name="widget_look_shrug">Lost the PC</string>
+    <string name="widget_preview_name" translatable="false">korus</string>
+    <string name="widget_preview_five" formatted="false" translatable="false">23%</string>
+    <string name="widget_preview_week" formatted="false" translatable="false">61%</string>
+</resources>

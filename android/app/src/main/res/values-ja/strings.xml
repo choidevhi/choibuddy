@@ -1,0 +1,77 @@
+<resources>
+    <string name="channel_status">接続状態</string>
+    <string name="channel_status_description">このスマホが PC と接続しているかを表示します</string>
+    <string name="channel_pending">承認リクエスト</string>
+    <string name="channel_pending_description">Claude Code が許可・回答・プランの承認を求めたときに通知します</string>
+    <string name="channel_finished">作業の通知</string>
+    <string name="channel_finished_description">セッションが完了したとき、またはエラーで止まったときに通知します</string>
+
+    <string name="status_one_pc">PC に接続済み</string>
+    <plurals name="status_pcs">
+        <item quantity="other">PC %d 台に接続済み</item>
+    </plurals>
+    <plurals name="status_sessions">
+        <item quantity="other">セッション %d 件</item>
+    </plurals>
+    <string name="status_connecting">接続しています…</string>
+    <string name="status_rejected_host">%1$s の接続コードが一致しません</string>
+
+    <string name="action_allow">許可</string>
+    <string name="action_deny">拒否</string>
+    <string name="action_open">開く</string>
+    <string name="send_failed">送信できませんでした · %1$s</string>
+
+    <string name="notice_permission">許可リクエスト</string>
+    <string name="notice_question">Claude からの質問</string>
+    <string name="notice_plan">プランの承認</string>
+    <string name="notice_finished">完了</string>
+    <string name="notice_error">エラーで停止</string>
+    <string name="notice_pick_answer">回答を選んでください</string>
+    <string name="notice_approve_plan">このプランを承認しますか？</string>
+    <string name="notice_finished_task">タスクが完了しました</string>
+
+    <string name="tool_run_command">コマンドを実行</string>
+    <string name="tool_edit_file">ファイルを編集</string>
+    <string name="tool_read_file">ファイルを読み取り</string>
+    <string name="tool_open_web">Web ページを開く</string>
+    <string name="tool_use">%1$s を使用</string>
+
+    <string name="toast_invalid_pairing">正しい接続コードではありません</string>
+    <string name="toast_scanner_unavailable">QR スキャナーを開けません</string>
+    <string name="image_saved">写真に保存しました</string>
+    <string name="image_save_failed">保存できませんでした</string>
+
+    <string name="pair_dialog_title">この PC と接続しますか？</string>
+    <string name="pair_dialog_confirm">接続</string>
+    <string name="pair_dialog_cancel">キャンセル</string>
+
+    <string name="attach_files">ファイルを選択</string>
+    <string name="attach_photo">写真を撮る</string>
+
+    <!-- 홈 화면 위젯. 상태 문구는 앱 UI의 look.* 문구와 같다. -->
+    <string name="widget_description">Claude Code がいま何をしているか、ホーム画面で見られます</string>
+    <string name="widget_offline_hint">タップしてアプリを開くと再接続します</string>
+    <string name="widget_resting_hint">実行中のセッションはありません</string>
+    <string name="widget_five_hour">5時間</string>
+    <string name="widget_weekly">週間</string>
+    <string name="widget_look_think">考え中</string>
+    <string name="widget_look_read">読んでいます</string>
+    <string name="widget_look_edit">修正中</string>
+    <string name="widget_look_write">書いています</string>
+    <string name="widget_look_bash">コマンド実行中</string>
+    <string name="widget_look_search">探しています</string>
+    <string name="widget_look_web">Web を見ています</string>
+    <string name="widget_look_agent">エージェントと作業中</string>
+    <string name="widget_look_todo">タスク整理中</string>
+    <string name="widget_look_question">質問しています</string>
+    <string name="widget_look_plan">計画を立てています</string>
+    <string name="widget_look_mcp">ツールに接続中</string>
+    <string name="widget_look_warning">承認待ち</string>
+    <string name="widget_look_failed">あっ、失敗しました</string>
+    <string name="widget_look_done">完了</string>
+    <string name="widget_look_dizzy">エラーで止まりました</string>
+    <string name="widget_look_closed">セッション終了</string>
+    <string name="widget_look_base">待機中</string>
+    <string name="widget_look_coffee">休憩中</string>
+    <string name="widget_look_shrug">PC との接続が切れました</string>
+</resources>

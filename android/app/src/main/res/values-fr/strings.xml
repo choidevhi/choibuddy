@@ -1,0 +1,81 @@
+<resources>
+    <string name="channel_status">État de la connexion</string>
+    <string name="channel_status_description">Indique si ce téléphone est connecté à votre PC</string>
+    <string name="channel_pending">Demandes d\'approbation</string>
+    <string name="channel_pending_description">Quand Claude Code demande une autorisation, une réponse ou l\'approbation d\'un plan</string>
+    <string name="channel_finished">Alertes de tâches</string>
+    <string name="channel_finished_description">Quand une session se termine ou s\'arrête sur une erreur</string>
+
+    <string name="status_one_pc">Connecté au PC</string>
+    <plurals name="status_pcs">
+        <item quantity="one">Connecté à %d PC</item>
+        <item quantity="many">Connecté à %d PC</item>
+        <item quantity="other">Connecté à %d PC</item>
+    </plurals>
+    <plurals name="status_sessions">
+        <item quantity="one">%d session</item>
+        <item quantity="many">%d sessions</item>
+        <item quantity="other">%d sessions</item>
+    </plurals>
+    <string name="status_connecting">Connexion…</string>
+    <string name="status_rejected_host">%1$s : le code d\'association ne correspond pas</string>
+
+    <string name="action_allow">Autoriser</string>
+    <string name="action_deny">Refuser</string>
+    <string name="action_open">Ouvrir</string>
+    <string name="send_failed">Échec de l\'envoi · %1$s</string>
+
+    <string name="notice_permission">Demande d\'autorisation</string>
+    <string name="notice_question">Question de Claude</string>
+    <string name="notice_plan">Approbation du plan</string>
+    <string name="notice_finished">Terminé</string>
+    <string name="notice_error">Arrêt sur une erreur</string>
+    <string name="notice_pick_answer">Choisissez une réponse</string>
+    <string name="notice_approve_plan">Approuver ce plan ?</string>
+    <string name="notice_finished_task">Tâche terminée</string>
+
+    <string name="tool_run_command">Exécuter une commande</string>
+    <string name="tool_edit_file">Modifier un fichier</string>
+    <string name="tool_read_file">Lire un fichier</string>
+    <string name="tool_open_web">Ouvrir une page web</string>
+    <string name="tool_use">Utiliser %1$s</string>
+
+    <string name="toast_invalid_pairing">Ce n\'est pas un code d\'association valide</string>
+    <string name="toast_scanner_unavailable">Impossible d\'ouvrir le lecteur de QR code</string>
+    <string name="image_saved">Enregistré dans Photos</string>
+    <string name="image_save_failed">Enregistrement impossible</string>
+
+    <string name="pair_dialog_title">Associer ce PC ?</string>
+    <string name="pair_dialog_confirm">Associer</string>
+    <string name="pair_dialog_cancel">Annuler</string>
+
+    <string name="attach_files">Choisir des fichiers</string>
+    <string name="attach_photo">Prendre une photo</string>
+
+    <!-- 홈 화면 위젯. 상태 문구는 앱 UI의 look.* 문구와 같다. -->
+    <string name="widget_description">Voyez ce que fait Claude Code, directement sur l’écran d’accueil</string>
+    <string name="widget_offline_hint">Touchez pour ouvrir l’app et vous reconnecter</string>
+    <string name="widget_resting_hint">Aucune session en cours</string>
+    <string name="widget_five_hour">5 h</string>
+    <string name="widget_weekly">Semaine</string>
+    <string name="widget_look_think">Réfléchit</string>
+    <string name="widget_look_read">Lit</string>
+    <string name="widget_look_edit">Modifie</string>
+    <string name="widget_look_write">Écrit</string>
+    <string name="widget_look_bash">Lance une commande</string>
+    <string name="widget_look_search">Cherche</string>
+    <string name="widget_look_web">Consulte le web</string>
+    <string name="widget_look_agent">Travaille avec des agents</string>
+    <string name="widget_look_todo">Organise les tâches</string>
+    <string name="widget_look_question">Vous pose une question</string>
+    <string name="widget_look_plan">Prépare un plan</string>
+    <string name="widget_look_mcp">Utilise un outil</string>
+    <string name="widget_look_warning">En attente d’approbation</string>
+    <string name="widget_look_failed">Oups, échec</string>
+    <string name="widget_look_done">Terminé</string>
+    <string name="widget_look_dizzy">Arrêté sur une erreur</string>
+    <string name="widget_look_closed">Session terminée</string>
+    <string name="widget_look_base">Inactif</string>
+    <string name="widget_look_coffee">En pause</string>
+    <string name="widget_look_shrug">PC déconnecté</string>
+</resources>

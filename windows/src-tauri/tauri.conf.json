@@ -1,0 +1,81 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ChoiBuddy",
+  "version": "0.5.6",
+  "identifier": "com.choidev.choibuddy",
+  "build": {
+    "beforeDevCommand": "corepack pnpm dev",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "corepack pnpm build",
+    "frontendDist": "../../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ChoiBuddy",
+        "width": 660,
+        "height": 360,
+        "minWidth": 420,
+        "minHeight": 300,
+        "decorations": false,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "backgroundColor": "#08080a",
+        "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+        "dragDropEnabled": false
+      },
+      {
+        "label": "float",
+        "title": "ChoiBuddy",
+        "url": "index.html?view=float",
+        "width": 360,
+        "height": 240,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "visible": false,
+        "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: http:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "choidev",
+    "shortDescription": "Claude Code 작업 위젯",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../bridge/src/": "bridge/src/",
+      "../../shared/protocol.ts": "shared/protocol.ts",
+      "../../mod/.claude-plugin/plugin.json": "mod/.claude-plugin/plugin.json",
+      "../../mod/hooks/": "mod/hooks/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Korean",
+          "English"
+        ]
+      }
+    }
+  },
+  "mainBinaryName": "ChoiBuddy"
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  브리지는 Tailscale 안에서 평문 HTTP로 열린다. 전송 암호화는 WireGuard가 맡는다.
+  PC 주소(100.x IP나 MagicDNS 이름)는 사람마다 달라 도메인을 미리 적을 수 없어 전체를 연다.
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
+</network-security-config>

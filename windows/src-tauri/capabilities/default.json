@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "ChoiBuddy 기본 권한. windows 대신 webviews로 지정해 main 창 안의 browser 웹뷰(외부 사이트)에는 적용되지 않게 한다.",
+  "webviews": [
+    "main",
+    "float"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}

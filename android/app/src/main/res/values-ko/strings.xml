@@ -1,0 +1,77 @@
+<resources>
+    <string name="channel_status">연결 상태</string>
+    <string name="channel_status_description">이 폰이 PC와 연결돼 있는지 보여 줘요</string>
+    <string name="channel_pending">승인 요청</string>
+    <string name="channel_pending_description">Claude Code가 권한·답변·계획 승인을 기다릴 때 알려요</string>
+    <string name="channel_finished">작업 알림</string>
+    <string name="channel_finished_description">세션이 끝나거나 오류로 멈추면 알려요</string>
+
+    <string name="status_one_pc">PC와 연결됨</string>
+    <plurals name="status_pcs">
+        <item quantity="other">PC %d대 연결됨</item>
+    </plurals>
+    <plurals name="status_sessions">
+        <item quantity="other">세션 %d개</item>
+    </plurals>
+    <string name="status_connecting">연결 중…</string>
+    <string name="status_rejected_host">%1$s 연결 코드가 맞지 않아요</string>
+
+    <string name="action_allow">허용</string>
+    <string name="action_deny">거부</string>
+    <string name="action_open">열기</string>
+    <string name="send_failed">전송 실패 · %1$s</string>
+
+    <string name="notice_permission">권한 요청</string>
+    <string name="notice_question">Claude의 질문</string>
+    <string name="notice_plan">계획 승인</string>
+    <string name="notice_finished">작업 끝</string>
+    <string name="notice_error">오류로 멈춤</string>
+    <string name="notice_pick_answer">답을 골라 주세요</string>
+    <string name="notice_approve_plan">이 계획을 승인할까요?</string>
+    <string name="notice_finished_task">작업을 마쳤어요</string>
+
+    <string name="tool_run_command">명령 실행</string>
+    <string name="tool_edit_file">파일 수정</string>
+    <string name="tool_read_file">파일 읽기</string>
+    <string name="tool_open_web">웹 페이지 열기</string>
+    <string name="tool_use">%1$s 사용</string>
+
+    <string name="toast_invalid_pairing">올바른 연결 코드가 아니에요</string>
+    <string name="toast_scanner_unavailable">QR 스캐너를 열 수 없어요</string>
+    <string name="image_saved">사진에 저장했어요</string>
+    <string name="image_save_failed">저장하지 못했어요</string>
+
+    <string name="pair_dialog_title">이 PC를 연결할까요?</string>
+    <string name="pair_dialog_confirm">연결</string>
+    <string name="pair_dialog_cancel">취소</string>
+
+    <string name="attach_files">파일 선택</string>
+    <string name="attach_photo">사진 찍기</string>
+
+    <!-- 홈 화면 위젯. 상태 문구는 앱 UI의 look.* 문구와 같다. -->
+    <string name="widget_description">Claude Code가 지금 무엇을 하는지 홈 화면에서 봐요</string>
+    <string name="widget_offline_hint">눌러서 앱을 열면 다시 연결해요</string>
+    <string name="widget_resting_hint">진행 중인 세션이 없어요</string>
+    <string name="widget_five_hour">5시간</string>
+    <string name="widget_weekly">주간</string>
+    <string name="widget_look_think">생각 중</string>
+    <string name="widget_look_read">읽는 중</string>
+    <string name="widget_look_edit">고치는 중</string>
+    <string name="widget_look_write">쓰는 중</string>
+    <string name="widget_look_bash">명령 실행 중</string>
+    <string name="widget_look_search">찾는 중</string>
+    <string name="widget_look_web">웹 보는 중</string>
+    <string name="widget_look_agent">에이전트와 일하는 중</string>
+    <string name="widget_look_todo">할 일 정리 중</string>
+    <string name="widget_look_question">질문하는 중</string>
+    <string name="widget_look_plan">계획 세우는 중</string>
+    <string name="widget_look_mcp">도구 연결 중</string>
+    <string name="widget_look_warning">승인 기다리는 중</string>
+    <string name="widget_look_failed">앗, 실패했어요</string>
+    <string name="widget_look_done">완료</string>
+    <string name="widget_look_dizzy">오류로 멈췄어요</string>
+    <string name="widget_look_closed">세션 종료</string>
+    <string name="widget_look_base">대기 중</string>
+    <string name="widget_look_coffee">쉬는 중</string>
+    <string name="widget_look_shrug">PC와 연결 끊김</string>
+</resources>

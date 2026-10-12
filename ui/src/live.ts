@@ -1,0 +1,319 @@
+import { createContext } from 'react'
+import type { CommandInfo, Conversation, Decision, DeviceInfo, DocFile, DocGroup, GalleryImage, HistoryEntry, Project, PromptMode } from '../../shared/protocol.ts'
+import type { Connection } from './platform.ts'
+
+export type LinkState = 'connecting' | 'live' | 'offline' | 'unauthorized'
+
+export async function sendDecision(connection: Connection, decision: Decision): Promise<'ok' | 'gone' | 'failed'> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/decide`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(decision),
+    })
+
+    if (res.status === 404) return 'gone'
+
+    return res.ok ? 'ok' : 'failed'
+  } catch {
+    return 'failed'
+  }
+}
+
+export async function dismissSession(connection: Connection, sessionId: string): Promise<void> {
+  await fetch(`${connection.baseUrl}/api/dismiss`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  }).catch(() => undefined)
+}
+
+export async function sendPrompt(connection: Connection, sessionId: string, text: string, mode: PromptMode): Promise<'queued' | 'no-mod' | 'failed'> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/prompt`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, text, mode }),
+    })
+
+    if (res.ok) return 'queued'
+
+    return res.status === 409 ? 'no-mod' : 'failed'
+  } catch {
+    return 'failed'
+  }
+}
+
+// The bridge connection for parts deep in the tree (image URLs, gallery).
+export const ConnectionContext = createContext<Connection | null>(null)
+
+export function imageUrl(connection: Connection, id: string): string {
+  return `${connection.baseUrl}/api/image/${encodeURIComponent(id)}?token=${encodeURIComponent(connection.token)}`
+}
+
+// The bridge builds this list itself from the same protocol file.
+export async function fetchGallery(connection: Connection): Promise<GalleryImage[]> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/gallery`, { headers: { Authorization: `Bearer ${connection.token}` } })
+    const body: { images?: GalleryImage[] } = await res.json()
+
+    return Array.isArray(body.images) ? body.images : []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchHistory(connection: Connection): Promise<HistoryEntry[]> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/history`, { headers: { Authorization: `Bearer ${connection.token}` } })
+    const body: { sessions?: HistoryEntry[] } = await res.json()
+
+    return Array.isArray(body.sessions) ? body.sessions : []
+  } catch {
+    return []
+  }
+}
+
+// The last `limit` messages, or (with `from`) every message from that index on.
+export async function fetchConversation(connection: Connection, sessionId: string, limit: number, from: number | null = null): Promise<Conversation | null> {
+  try {
+    const query = `session=${encodeURIComponent(sessionId)}&limit=${limit}${from === null ? '' : `&from=${from}`}`
+    const res = await fetch(`${connection.baseUrl}/api/conversation?${query}`, { headers: { Authorization: `Bearer ${connection.token}` } })
+
+    if (!res.ok) return null
+
+    const body: Conversation = await res.json()
+
+    return Array.isArray(body.messages) ? body : null
+  } catch {
+    return null
+  }
+}
+
+const ownerHeaders = (connection: Connection): Record<string, string> => ({ Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' })
+
+// Devices paired with this PC, or null when the code in hand is a device's
+// own (only the PC's own code may list and manage devices).
+export async function listDevices(connection: Connection): Promise<DeviceInfo[] | null> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/devices`, { headers: ownerHeaders(connection) })
+
+    if (!res.ok) return null
+
+    const body: { devices?: DeviceInfo[] } = await res.json()
+
+    return Array.isArray(body.devices) ? body.devices : []
+  } catch {
+    return null
+  }
+}
+
+export async function createDevice(connection: Connection): Promise<string | null> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/devices`, { method: 'POST', headers: ownerHeaders(connection) })
+    const body: { token?: string } = await res.json()
+
+    return typeof body.token === 'string' ? body.token : null
+  } catch {
+    return null
+  }
+}
+
+export async function revokeDevice(connection: Connection, id: string): Promise<boolean> {
+  const res = await fetch(`${connection.baseUrl}/api/devices/revoke`, { method: 'POST', headers: ownerHeaders(connection), body: JSON.stringify({ id }) }).catch(() => null)
+
+  return res?.ok === true
+}
+
+export async function rotateCodes(connection: Connection): Promise<boolean> {
+  const res = await fetch(`${connection.baseUrl}/api/rotate`, { method: 'POST', headers: ownerHeaders(connection) }).catch(() => null)
+
+  return res?.ok === true
+}
+
+export type Uploaded = {
+  path: string
+  name: string
+  size: number
+}
+
+// Sends a file to the PC that runs the session; Claude gets its path.
+export async function uploadFile(connection: Connection, sessionId: string, file: File): Promise<Uploaded | null> {
+  try {
+    const name = file.name === '' ? 'pasted.png' : file.name
+    const query = `name=${encodeURIComponent(name)}&session=${encodeURIComponent(sessionId)}`
+    const res = await fetch(`${connection.baseUrl}/api/upload?${query}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': file.type === '' ? 'application/octet-stream' : file.type },
+      body: file,
+    })
+
+    if (!res.ok) return null
+
+    const body: Partial<Uploaded> = await res.json()
+
+    return typeof body.path === 'string' ? { path: body.path, name: body.name ?? name, size: body.size ?? file.size } : null
+  } catch {
+    return null
+  }
+}
+
+export type SetupStatus = {
+  hooks: boolean
+  mod: boolean
+}
+
+export async function fetchSetup(connection: Connection): Promise<SetupStatus | null> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/setup`, { headers: { Authorization: `Bearer ${connection.token}` } })
+
+    if (!res.ok) return null
+
+    const body: Partial<SetupStatus> = await res.json()
+
+    return { hooks: body.hooks === true, mod: body.mod === true }
+  } catch {
+    return null
+  }
+}
+
+// 0 turns Auto Accept off, a negative number keeps it on until turned off.
+export async function setAutoAccept(connection: Connection, minutes: number): Promise<boolean> {
+  const res = await fetch(`${connection.baseUrl}/api/auto-accept`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ minutes }),
+  }).catch(() => null)
+
+  return res?.ok === true
+}
+
+export async function fetchDocs(connection: Connection): Promise<DocGroup[]> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/docs`, { headers: { Authorization: `Bearer ${connection.token}` } })
+    const body: { groups?: DocGroup[] } = await res.json()
+
+    return Array.isArray(body.groups) ? body.groups : []
+  } catch {
+    return []
+  }
+}
+
+export async function readDoc(connection: Connection, id: string): Promise<{ file: DocFile; text: string } | null> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/docs/file?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${connection.token}` } })
+    const body: { file?: DocFile; text?: string } = await res.json()
+
+    return res.ok && body.file !== undefined && typeof body.text === 'string' ? { file: body.file, text: body.text } : null
+  } catch {
+    return null
+  }
+}
+
+export type SaveResult = { ok: true; file: DocFile } | { ok: false; conflict: string | null }
+
+export async function writeDoc(connection: Connection, id: string, text: string, mtime: number): Promise<SaveResult> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/docs/file`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, text, mtime }),
+    })
+    const body: { file?: DocFile; current?: string | null } = await res.json()
+
+    if (res.ok && body.file !== undefined) return { ok: true, file: body.file }
+
+    return { ok: false, conflict: res.status === 409 ? (body.current ?? '') : null }
+  } catch {
+    return { ok: false, conflict: null }
+  }
+}
+
+const authHeaders = (connection: Connection, json = false): Record<string, string> =>
+  json ? { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' } : { Authorization: `Bearer ${connection.token}` }
+
+// Pictures load through fetch with the code in a header, like every other
+// call, rather than as a plain <img> URL: that is what works in the phone's
+// WebView too. The blob keeps a GIF animated.
+export async function fetchImageBlob(connection: Connection, id: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/image/${encodeURIComponent(id)}`, { headers: authHeaders(connection) })
+
+    return res.ok ? await res.blob() : null
+  } catch {
+    return null
+  }
+}
+
+export async function deleteImage(connection: Connection, id: string): Promise<boolean> {
+  const res = await fetch(`${connection.baseUrl}/api/gallery/delete`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ id }) }).catch(() => null)
+
+  return res?.ok === true
+}
+
+export async function clearGallery(connection: Connection): Promise<boolean> {
+  const res = await fetch(`${connection.baseUrl}/api/gallery/clear`, { method: 'POST', headers: authHeaders(connection, true), body: '{}' }).catch(() => null)
+
+  return res?.ok === true
+}
+
+export type DeleteResult = 'deleted' | 'live' | 'failed'
+
+export async function deleteConversation(connection: Connection, sessionId: string): Promise<DeleteResult> {
+  const res = await fetch(`${connection.baseUrl}/api/conversation/delete`, {
+    method: 'POST',
+    headers: authHeaders(connection, true),
+    body: JSON.stringify({ sessionId }),
+  }).catch(() => null)
+
+  if (res?.ok === true) return 'deleted'
+
+  return res?.status === 409 ? 'live' : 'failed'
+}
+
+export async function fetchCommands(connection: Connection, sessionId: string): Promise<CommandInfo[]> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/commands?session=${encodeURIComponent(sessionId)}`, { headers: authHeaders(connection) })
+    const body: { commands?: CommandInfo[] } = await res.json()
+
+    return Array.isArray(body.commands) ? body.commands : []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchProjects(connection: Connection): Promise<Project[]> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/projects`, { headers: authHeaders(connection) })
+    const body: { projects?: Project[] } = await res.json()
+
+    return Array.isArray(body.projects) ? body.projects : []
+  } catch {
+    return []
+  }
+}
+
+export type OpenResult = { ok: true; terminal: string } | { ok: false; error: string }
+
+export async function openNewSession(connection: Connection, cwd: string, prompt: string): Promise<OpenResult> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/session/new`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ cwd, prompt }) })
+    const body: { terminal?: string; error?: string } = await res.json()
+
+    return res.ok ? { ok: true, terminal: body.terminal ?? '' } : { ok: false, error: body.error ?? String(res.status) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+export type BrowserAnswer = { ok: true; url: string; title: string; picked: string | null; image: string | null } | { ok: false; error: string }
+
+export async function answerBrowser(connection: Connection, id: string, answer: BrowserAnswer): Promise<boolean> {
+  const res = await fetch(`${connection.baseUrl}/api/browser/answer`, {
+    method: 'POST',
+    headers: authHeaders(connection, true),
+    body: JSON.stringify({ id, ...answer }),
+  }).catch(() => null)
+
+  return res?.ok === true
+}

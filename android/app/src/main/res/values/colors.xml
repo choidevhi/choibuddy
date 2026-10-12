@@ -1,0 +1,16 @@
+<resources>
+    <color name="background">#0b0b0d</color>
+    <!-- 브랜드 아이콘 PNG의 바탕색과 같다. -->
+    <color name="ic_launcher_background">#141417</color>
+    <!-- 홈 화면 위젯. 앱 UI(ui/src/styles.css)의 밝은 테마 색과 같다. -->
+    <color name="widget_card">#FFFBFBFC</color>
+    <color name="widget_line">#0F000000</color>
+    <color name="widget_text">#FF141417</color>
+    <color name="widget_muted">#FF6C6C75</color>
+    <color name="widget_dim">#FFA4A4AD</color>
+    <color name="widget_accent">#FF2563EB</color>
+    <color name="widget_good">#FF16A34A</color>
+    <color name="widget_warn">#FFD97706</color>
+    <color name="widget_bad">#FFDC2626</color>
+    <color name="widget_track">#14000000</color>
+</resources>

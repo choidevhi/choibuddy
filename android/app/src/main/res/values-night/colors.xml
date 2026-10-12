@@ -1,0 +1,13 @@
+<resources>
+    <!-- 홈 화면 위젯. 앱 UI(ui/src/styles.css)의 어두운 테마 색과 같다. -->
+    <color name="widget_card">#FF151517</color>
+    <color name="widget_line">#0FFFFFFF</color>
+    <color name="widget_text">#FFF4F4F5</color>
+    <color name="widget_muted">#FF8E8E96</color>
+    <color name="widget_dim">#FF55555D</color>
+    <color name="widget_accent">#FF3B82F6</color>
+    <color name="widget_good">#FF4ADE80</color>
+    <color name="widget_warn">#FFFBBF24</color>
+    <color name="widget_bad">#FFF87171</color>
+    <color name="widget_track">#1AFFFFFF</color>
+</resources>

@@ -1,0 +1,148 @@
+// Installs the bridge into ~/.choibuddy/app, wires Claude Code's hooks to it
+// in ~/.claude/settings.json (backed up first) and installs the companion mod
+// (usage figures, prompts from the widget) into ~/.claude/local-mods.
+// `--uninstall` removes the hooks and the mod again and stops the bridge.
+import { spawnSync } from 'node:child_process'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { CONFIG_PATH, HOME_DIR, loadConfig } from './config.ts'
+import { arr, asObject, type JsonObject, objects, parseJsonObject, str } from './json.ts'
+import { withOurHooks, withoutOurHooks } from './settings-hooks.ts'
+
+const SETTINGS_PATH = process.env.CHOIBUDDY_SETTINGS ?? join(homedir(), '.claude', 'settings.json')
+const APP_DIR = join(HOME_DIR, 'app')
+const SOURCE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const MODS_DIR = join(homedir(), '.claude', 'local-mods')
+const MOD_NAME = 'choibuddy'
+const MARKETPLACE = 'local-mods'
+
+function copyApp(): string {
+  const bridgeOut = join(APP_DIR, 'bridge', 'src')
+  const sharedOut = join(APP_DIR, 'shared')
+
+  mkdirSync(bridgeOut, { recursive: true })
+  mkdirSync(sharedOut, { recursive: true })
+
+  for (const file of readdirSync(join(SOURCE_ROOT, 'bridge', 'src'))) {
+    if (file.endsWith('.ts')) copyFileSync(join(SOURCE_ROOT, 'bridge', 'src', file), join(bridgeOut, file))
+  }
+
+  copyFileSync(join(SOURCE_ROOT, 'shared', 'protocol.ts'), join(sharedOut, 'protocol.ts'))
+
+  return join(bridgeOut, 'ensure.ts')
+}
+
+function claude(args: string[]): boolean {
+  const result = spawnSync('claude', args, { encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' })
+
+  return result.status === 0
+}
+
+// The mod lives in a folder marketplace, so edits there reach sessions with
+// /reload-plugins and no reinstall.
+function installMod(): boolean {
+  const target = join(MODS_DIR, MOD_NAME)
+  const manifestPath = join(MODS_DIR, '.claude-plugin', 'marketplace.json')
+
+  rmSync(target, { recursive: true, force: true })
+  cpSync(join(SOURCE_ROOT, 'mod'), target, {
+    recursive: true,
+    filter: source => !source.includes(join('mod', 'test')) && !source.includes(join('.claude-plugin', 'types')),
+  })
+
+  const manifest = existsSync(manifestPath) ? parseJsonObject(readFileSync(manifestPath, 'utf8')) : null
+  const plugins = objects(arr(manifest, 'plugins')).filter(plugin => str(plugin, 'name') !== MOD_NAME)
+  const next: JsonObject = {
+    name: str(manifest, 'name') ?? MARKETPLACE,
+    owner: asObject(manifest?.owner) ?? { name: 'choidevhi' },
+    plugins: [...plugins, { name: MOD_NAME, source: `./${MOD_NAME}`, description: 'ChoiBuddy: 사용량 보고와 원격 프롬프트' }],
+  }
+
+  mkdirSync(dirname(manifestPath), { recursive: true })
+  writeFileSync(manifestPath, `${JSON.stringify(next, null, 2)}\n`)
+
+  if (!claude(['plugin', 'marketplace', 'update', MARKETPLACE])) claude(['plugin', 'marketplace', 'add', MODS_DIR])
+
+  return claude(['plugin', 'install', `${MOD_NAME}@${MARKETPLACE}`, '--scope', 'user'])
+}
+
+function readSettings(): JsonObject {
+  if (!existsSync(SETTINGS_PATH)) return {}
+
+  const parsed = parseJsonObject(readFileSync(SETTINGS_PATH, 'utf8'))
+
+  if (parsed === null) throw new Error(`${SETTINGS_PATH} 을(를) JSON으로 읽지 못했어요. 손대지 않고 멈춥니다.`)
+
+  return parsed
+}
+
+function writeSettings(settings: JsonObject): void {
+  if (existsSync(SETTINGS_PATH)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+
+    copyFileSync(SETTINGS_PATH, `${SETTINGS_PATH}.choibuddy-backup-${stamp}`)
+  }
+
+  mkdirSync(dirname(SETTINGS_PATH), { recursive: true })
+  writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`)
+}
+
+async function stopBridge(port: number, token: string): Promise<void> {
+  try {
+    await fetch(`http://127.0.0.1:${port}/api/shutdown`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(1000),
+    })
+    await new Promise(resolve => setTimeout(resolve, 300))
+  } catch {
+    // Not running.
+  }
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig()
+  const settings = readSettings()
+  const hooks = asObject(settings.hooks) ?? {}
+
+  await stopBridge(config.port, config.token)
+
+  if (process.argv.includes('--uninstall')) {
+    const rest = withoutOurHooks(hooks)
+
+    writeSettings({ ...settings, hooks: rest })
+    claude(['plugin', 'uninstall', `${MOD_NAME}@${MARKETPLACE}`, '--scope', 'user'])
+    console.log('ChoiBuddy 훅과 mod를 지웠고 브리지를 멈췄어요.')
+
+    return
+  }
+
+  const ensurePath = copyApp()
+
+  writeSettings({ ...settings, hooks: withOurHooks(hooks, config.port, ensurePath) })
+
+  const modInstalled = installMod()
+
+  const started = spawnSync(process.execPath, ['--no-warnings', ensurePath], { stdio: 'inherit' })
+  const health = await fetch(`http://127.0.0.1:${config.port}/api/health`).then(
+    res => res.ok,
+    () => false,
+  )
+  const snapshot = health
+    ? parseJsonObject(await fetch(`http://127.0.0.1:${config.port}/api/snapshot`, { headers: { Authorization: `Bearer ${config.token}` } }).then(res => res.text()))
+    : null
+  const tailnetUrl = str(asObject(snapshot?.server), 'tailnetUrl')
+
+  console.log(`설치 위치: ${APP_DIR}`)
+  console.log(`설정 파일: ${SETTINGS_PATH} (백업 후 훅 추가)`)
+  console.log(`토큰 파일: ${CONFIG_PATH}`)
+  console.log(`브리지: ${health ? '실행 중' : `시작 실패 (종료 코드 ${started.status})`}`)
+  console.log(`사용량·프롬프트 mod: ${modInstalled ? `설치됨 (${join(MODS_DIR, MOD_NAME)}), 열려 있는 세션은 /reload-plugins` : '설치 실패: claude plugin install로 직접 설치해 주세요'}`)
+  // The pairing link carries the token, so it is shown as a QR in the app
+  // (＋ tab) rather than printed into terminal scrollback.
+  console.log(`휴대폰 연결: ${tailnetUrl === null ? 'Tailscale이 꺼져 있어요' : `ChoiBuddy 창의 ＋ 탭에서 QR을 찍어 주세요 (${tailnetUrl})`}`)
+}
+
+await main()

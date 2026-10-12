@@ -1,0 +1,13 @@
+node_modules/
+ui/dist/
+windows/src-tauri/target/
+windows/src-tauri/gen/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.kotlin/
+*.log
+android/dist/
+# Old local captures, not part of the project.
+preview/
