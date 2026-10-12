@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useBackLayer } from './back.ts'
 import { showToast } from './confirm.tsx'
 import { useI18n } from './i18n.ts'
@@ -10,6 +10,9 @@ export const APP_VERSION = __APP_VERSION__
 
 const REPO = 'choidevhi/choibuddy'
 const CHECK_MS = 6 * 60 * 60_000
+// Back in the app after this long, it asks again: a phone keeps the app
+// running for days without starting it anew.
+const RESUME_MS = 30 * 60_000
 const KEY = 'choibuddy.update'
 
 export type Release = {
@@ -69,7 +72,7 @@ async function fetchLatest(): Promise<Release | null> {
   }
 }
 
-// The last answer, so several starts in a row ask GitHub only once.
+// The last answer, shown at once while GitHub is asked again.
 function readCached(): { at: number; release: Release | null } | null {
   try {
     const cached: { at?: number; release?: Release | null } = JSON.parse(localStorage.getItem(KEY) ?? 'null') ?? {}
@@ -80,36 +83,72 @@ function readCached(): { at: number; release: Release | null } | null {
   }
 }
 
-// A newer release than this app, checked at start and every 6 hours.
-export function useUpdate(): Release | null {
+export type UpdateState = {
+  // A newer release than this app, or null.
+  release: Release | null
+  // When GitHub last answered (0: not yet).
+  checkedAt: number
+  checking: boolean
+  // Asks GitHub now; false when it could not be reached.
+  check: () => Promise<boolean>
+}
+
+// A newer release than this app: asked at every start, every 6 hours, when
+// the app comes back after a while, and from the settings button.
+export function useUpdate(): UpdateState {
   const [latest, setLatest] = useState<Release | null>(() => readCached()?.release ?? null)
+  const [checkedAt, setCheckedAt] = useState(() => readCached()?.at ?? 0)
+  const [checking, setChecking] = useState(false)
+  const lastAt = useRef(0)
+
+  const check = useCallback(async (): Promise<boolean> => {
+    if (platform === 'web') return false
+
+    setChecking(true)
+
+    const release = await fetchLatest()
+
+    setChecking(false)
+
+    // Offline or refused: what was known stays.
+    if (release === null) return false
+
+    const at = Date.now()
+
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ at, release }))
+    } catch {
+      // Shown from memory until the next start.
+    }
+    lastAt.current = at
+    setLatest(release)
+    setCheckedAt(at)
+
+    return true
+  }, [])
 
   useEffect(() => {
     if (platform === 'web') return
 
-    const check = (): void => {
-      const cached = readCached()
+    void check()
 
-      if (cached !== null && Date.now() - cached.at < CHECK_MS) return
+    const timer = window.setInterval(() => void check(), CHECK_MS)
 
-      void fetchLatest().then(release => {
-        try {
-          localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), release }))
-        } catch {
-          // Asking again next time is fine.
-        }
-        setLatest(release)
-      })
+    const onBack = (): void => {
+      if (document.visibilityState === 'visible' && Date.now() - lastAt.current >= RESUME_MS) void check()
     }
 
-    check()
+    document.addEventListener('visibilitychange', onBack)
+    window.addEventListener('focus', onBack)
 
-    const timer = window.setInterval(check, CHECK_MS)
-
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onBack)
+      window.removeEventListener('focus', onBack)
+    }
   }, [])
 
-  return latest !== null && isNewer(latest.version, APP_VERSION) ? latest : null
+  return { release: latest !== null && isNewer(latest.version, APP_VERSION) ? latest : null, checkedAt, checking, check }
 }
 
 // Windows downloads and installs it, then starts again; the phone opens the

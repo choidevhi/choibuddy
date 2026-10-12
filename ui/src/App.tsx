@@ -460,9 +460,9 @@ export function App() {
               </button>
             )}
 
-            {update !== null && (
-              <button type="button" className="update-badge" onClick={() => setUpdating(true)} title={t('update.title', { v: update.version })}>
-                <DownloadIcon size={14} /> <span className="update-badge-text">{t('update.badge', { v: update.version })}</span>
+            {update.release !== null && (
+              <button type="button" className="update-badge" onClick={() => setUpdating(true)} title={t('update.title', { v: update.release.version })}>
+                <DownloadIcon size={14} /> <span className="update-badge-text">{t('update.badge', { v: update.release.version })}</span>
               </button>
             )}
 
@@ -574,7 +574,7 @@ export function App() {
 
           {newSession && <NewSessionSheet feeds={feeds} preferredKey={current?.pcKey ?? null} onClose={() => setNewSession(false)} />}
 
-          {updating && update !== null && <UpdateSheet release={update} onClose={() => setUpdating(false)} />}
+          {updating && update.release !== null && <UpdateSheet release={update.release} onClose={() => setUpdating(false)} />}
 
           {toast !== null && <div className="toast">{toast}</div>}
         </div>

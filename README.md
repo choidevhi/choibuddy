@@ -45,7 +45,7 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 
 - **Images.** Every picture and screenshot Claude opened, PC by PC and session by session. GIFs play. Save them to your device, remove them or clear a PC's list.
 - **Keyboard.** Ctrl+PageUp and Ctrl+PageDown move between the tabs.
-- **Updates.** The apps check GitHub for a newer release every few hours and offer it in the top bar.
+- **Updates.** The apps ask GitHub for a newer release at every start, every 6 hours, when you come back to the app after half an hour, and whenever you press "Check for updates" in settings. A newer one shows in the top bar.
   - Windows downloads and installs it, then starts again. The bridge, hooks and mod follow by themselves once no approval is waiting, and Auto Accept stays on.
   - The phone downloads the APK for you to install.
 

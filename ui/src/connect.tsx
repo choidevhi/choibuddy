@@ -10,7 +10,7 @@ import { type CodexState, createDevice, fetchCodex, fetchSetup, listDevices, rev
 import { parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
-import { APP_VERSION, type Release } from './update.tsx'
+import { APP_VERSION, type UpdateState } from './update.tsx'
 
 function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; on: boolean; onChange: (next: boolean) => void }) {
   return (
@@ -597,7 +597,7 @@ type ConnectProps = {
   onLang: (next: Lang) => void
   onSourcesChanged: () => void
   // A newer release, when there is one.
-  update: Release | null
+  update: UpdateState
   onUpdate: () => void
 }
 
@@ -675,11 +675,27 @@ export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourc
         <div className="row">
           <span className="row-text">
             <span>{t('update.appVersion')}</span>
-            <span className="row-hint">{update === null ? t('update.latest', { v: APP_VERSION }) : t('update.available', { v: update.version, current: APP_VERSION })}</span>
+            <span className="row-hint">
+              {update.release === null ? t('update.latest', { v: APP_VERSION }) : t('update.available', { v: update.release.version, current: APP_VERSION })}
+              {update.checkedAt > 0 && ` · ${t('update.checked', { when: ago(t, now - update.checkedAt) })}`}
+            </span>
           </span>
-          {update !== null && (
+          {update.release !== null ? (
             <button type="button" className="btn small btn--allow" onClick={onUpdate}>
               {t('update.confirm')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn small"
+              disabled={update.checking}
+              onClick={() =>
+                void update.check().then(reached => {
+                  if (!reached) showToast(t('update.checkFailed'))
+                })
+              }
+            >
+              {update.checking ? t('update.checking') : t('update.check')}
             </button>
           )}
         </div>
