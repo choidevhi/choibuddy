@@ -9,7 +9,7 @@ import { type Config, type Device, hashToken, newToken, VERSION } from './config
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
-import { codexCommand, codexHooksCurrent, type CodexState, codexState, codexTrust, findCodex, setCodexHooks } from './codex.ts'
+import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, codexTrust, setCodexHooks } from './codex.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
@@ -139,8 +139,8 @@ export type BridgeOptions = {
   // Codex's settings folder (~/.codex), where its hooks.json lives. Left out,
   // the bridge leaves Codex alone (tests must never touch the real one).
   codexHome?: string
-  // How to start Codex's app-server (to trust the hooks); found on the PC by default.
-  codexApp?: string[] | null
+  // Codex's programs on the PC (to install the CLI and trust the hooks).
+  codexTools?: CodexTools
   // Names and archive flags; defaults to sessions.json beside the uploads folder.
   metaPath?: string
   // Who is on the tailnet (tests hand in a made-up one).
@@ -309,24 +309,31 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const codexHome = options.codexHome ?? null
   // What Codex runs: this bridge's own Node and hook script.
   const codexHook = codexCommand(process.execPath, join(dirname(fileURLToPath(import.meta.url)), 'ensure.ts'))
-  let codexApp: string[] | null | undefined = options.codexApp
+  const codexTools = options.codexTools ?? CODEX_TOOLS
+  // The Codex app's own codex.exe, looked up once (it takes a moment).
+  let codexAppFound: string[] | null | undefined
   let codexChecked: { at: number; trusted: boolean | null } | null = null
+  let codexInstalling: Promise<boolean> | null = null
+
+  const codexApp = (): string[] | null => {
+    codexAppFound ??= codexTools.app()
+
+    return codexAppFound
+  }
 
   // Whether Codex trusts ChoiBuddy's hooks (null: not connected, or Codex's
   // app-server could not be asked). With `trust`, records the trust first.
-  const codexStatus = async (trust: boolean): Promise<CodexState & { trusted: boolean | null }> => {
-    const state = codexHome === null ? { installed: false, connected: false } : codexState(codexHome)
+  // The app's codex.exe answers first: that is the Codex that runs the hooks.
+  const codexStatus = async (trust: boolean): Promise<CodexState & { trusted: boolean | null; cli: boolean }> => {
+    const cli = codexTools.cli()
+    const known = codexHome === null ? { installed: false, connected: false } : codexState(codexHome)
+    const state = { ...known, installed: known.installed || cli !== null, cli: cli !== null }
 
     if (!state.connected) return { ...state, trusted: null }
     if (!trust && codexChecked !== null && now() - codexChecked.at < CODEX_CHECK_MS) return { ...state, trusted: codexChecked.trusted }
 
-    if (codexApp === undefined) {
-      const exe = findCodex()
-
-      codexApp = exe === null ? null : [exe, 'app-server']
-    }
-
-    const seen = codexApp === null ? null : await codexTrust(codexApp, homedir(), trust)
+    const program = codexApp() ?? cli
+    const seen = program === null ? null : await codexTrust([...program, 'app-server'], homedir(), trust)
     const trusted = seen === null ? null : seen.ours > 0 && seen.trusted === seen.ours
 
     codexChecked = { at: now(), trusted }
@@ -1262,6 +1269,28 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
         return
       }
+
+      // No `codex` command yet: OpenAI's CLI goes in first (winget). Pressing
+      // twice waits for the same install.
+      if (on && codexTools.cli() === null) {
+        log('installing the Codex CLI')
+        codexInstalling ??= codexTools.install().finally(() => {
+          codexInstalling = null
+        })
+
+        const installed = await codexInstalling
+
+        log(`Codex CLI install ${installed ? 'done' : 'failed'}`)
+
+        if (!installed && codexApp() === null) {
+          sendJson(res, 500, { ok: false, error: 'codex cli install failed' })
+
+          return
+        }
+      }
+
+      // Installed before but `codex` does not run in a terminal: fixed too.
+      if (on && codexTools.cli() !== null) codexTools.command()
 
       setCodexHooks(codexHome, on ? codexHook : null)
       codexChecked = null

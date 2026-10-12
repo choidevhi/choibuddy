@@ -298,7 +298,7 @@ function CodexRow({ feed }: { feed: Feed }) {
     void fetchCodex(feed.connection).then(setState)
   }, [feed.connection.token])
 
-  if (state === null || !state.installed) return null
+  if (state === null) return null
 
   const change = async (on: boolean): Promise<void> => {
     setBusy(true)
@@ -310,7 +310,14 @@ function CodexRow({ feed }: { feed: Feed }) {
     else setState(next)
   }
 
-  const hint = !state.connected ? t('codex.hint') : state.trusted === true ? t('codex.ready') : t('codex.trust')
+  // Connecting may first install the Codex CLI, which takes a while.
+  const hint = busy
+    ? t(state.cli ? 'codex.working' : 'codex.installing')
+    : !state.connected
+      ? `${t('codex.hint')}${state.cli ? '' : ` ${t('codex.installHint')}`}`
+      : state.trusted === true
+        ? t('codex.ready')
+        : t('codex.trust')
 
   return (
     <div className="row codex-row">

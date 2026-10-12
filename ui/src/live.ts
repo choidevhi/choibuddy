@@ -355,15 +355,15 @@ export async function openTerminal(connection: Connection, cwd: string): Promise
 }
 
 // `trusted`: whether Codex runs the hooks (null: not connected, or Codex
-// could not be asked).
-export type CodexState = { installed: boolean; connected: boolean; trusted: boolean | null }
+// could not be asked). `cli`: whether the `codex` command is there.
+export type CodexState = { installed: boolean; connected: boolean; trusted: boolean | null; cli: boolean }
 
-type CodexBody = { installed?: boolean; connected?: boolean; trusted?: boolean | null }
+type CodexBody = { installed?: boolean; connected?: boolean; trusted?: boolean | null; cli?: boolean }
 
 function codexStateOf(body: CodexBody | null): CodexState | null {
   return body === null || typeof body.installed !== 'boolean' || typeof body.connected !== 'boolean'
     ? null
-    : { installed: body.installed, connected: body.connected, trusted: typeof body.trusted === 'boolean' ? body.trusted : null }
+    : { installed: body.installed, connected: body.connected, trusted: typeof body.trusted === 'boolean' ? body.trusted : null, cli: body.cli === true }
 }
 
 // Codex on the PC, and whether ChoiBuddy's hooks are in its hooks.json.

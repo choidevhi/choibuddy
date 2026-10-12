@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { codexAnswer, codexConnected, patchFiles, patchLines, withCodexHooks } from '../src/codex.ts'
+import { codexAnswer, codexCommand, codexConnected, ensureCodexCommand, findCodexCli, patchFiles, patchLines, withCodexHooks } from '../src/codex.ts'
 import { arr, type JsonObject, obj, objects, parseJsonObject, str } from '../src/json.ts'
 import { startBridge } from '../src/server.ts'
 
@@ -58,6 +58,7 @@ test("apply_patch shows the files it touches and the first file's changes", () =
 test('a Codex session shows its steps, asks through the hook script and reads its rollout', async () => {
   const root = mkdtempSync(join(tmpdir(), 'choibuddy-codex-'))
   const rollout = join(root, 'rollout-test.jsonl')
+  let installs = 0
   const at = new Date(Date.UTC(2026, 9, 12, 3)).toISOString()
 
   writeFileSync(
@@ -83,7 +84,18 @@ test('a Codex session shows its steps, asks through the hook script and reads it
     read: () => null,
     modManifest: join(root, 'no-mod.json'),
     codexHome: join(root, 'codex'),
-    codexApp: [process.execPath, '--no-warnings', join(import.meta.dirname, 'fake-codex-app-server.ts'), join(root, 'codex', 'hooks.json'), join(root, 'trust.json')],
+    // No CLI at first: connecting installs one (a stand-in), whose app-server
+    // (another stand-in) trusts the hooks.
+    codexTools: {
+      cli: () => (installs > 0 ? [process.execPath, '--no-warnings', join(import.meta.dirname, 'fake-codex-app-server.ts'), join(root, 'codex', 'hooks.json'), join(root, 'trust.json')] : null),
+      app: () => null,
+      install: async () => {
+        installs += 1
+
+        return true
+      },
+      command: () => true,
+    },
   })
   const url = `http://127.0.0.1:${bridge.port}`
   const headers = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
@@ -147,11 +159,13 @@ test('a Codex session shows its steps, asks through the hook script and reads it
     const file = parseJsonObject(readFileSync(join(root, 'codex', 'hooks.json'), 'utf8'))
     const trust = parseJsonObject(readFileSync(join(root, 'trust.json'), 'utf8'))
 
+    assert.equal(installs, 1)
+    assert.equal(connected?.cli, true)
     assert.equal(connected?.connected, true)
     assert.equal(connected?.trusted, true)
     assert.equal(Object.keys(trust ?? {}).length, 10)
     assert.equal(codexConnected(file), true)
-    assert.ok((str(objects(arr(objects(arr(obj(file, 'hooks'), 'Stop'))[0] ?? {}, 'hooks'))[0] ?? {}, 'command') ?? '').includes(process.execPath))
+    assert.match(str(objects(arr(objects(arr(obj(file, 'hooks'), 'Stop'))[0] ?? {}, 'hooks'))[0] ?? {}, 'command') ?? '', /^\S+node\.exe --no-warnings \S+ensure\.ts --codex$/i)
   } finally {
     await bridge.close()
   }
@@ -175,8 +189,92 @@ test('a bridge not told where Codex lives leaves Codex alone', async () => {
   const headers = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
 
   try {
-    assert.deepEqual(parseJsonObject(await (await fetch(`${url}/api/codex`, { headers })).text()), { installed: false, connected: false, trusted: null })
+    assert.equal(parseJsonObject(await (await fetch(`${url}/api/codex`, { headers })).text())?.connected, false)
     assert.equal((await fetch(`${url}/api/codex`, { method: 'POST', headers, body: JSON.stringify({ on: true }) })).status, 404)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("the codex command is found on the PATH, in winget's links or as npm's shim", () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-codexcli-'))
+  const npm = join(root, 'npm')
+  const links = join(root, 'local', 'Microsoft', 'WinGet', 'Links')
+
+  mkdirSync(npm, { recursive: true })
+  mkdirSync(links, { recursive: true })
+  assert.equal(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }), null)
+
+  writeFileSync(join(npm, 'codex.cmd'), '@echo off')
+  assert.deepEqual(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }), [join(npm, 'codex.cmd')])
+
+  // winget's codex.exe wins over npm's shim, even outside the PATH.
+  writeFileSync(join(links, 'codex.exe'), '')
+  assert.deepEqual(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }), [join(links, 'codex.exe')])
+})
+
+test("without winget's link, the unpacked program is found and `codex` gets a shim", () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-codexpkg-'))
+  const pkg = join(root, 'local', 'Microsoft', 'WinGet', 'Packages', 'OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe')
+  const env = { PATH: pkg, LOCALAPPDATA: join(root, 'local') }
+
+  mkdirSync(pkg, { recursive: true })
+  assert.equal(ensureCodexCommand(env), false)
+
+  writeFileSync(join(pkg, 'codex-x86_64-pc-windows-msvc.exe'), '')
+  assert.deepEqual(findCodexCli(env), [join(pkg, 'codex-x86_64-pc-windows-msvc.exe')])
+  assert.equal(ensureCodexCommand(env), true)
+  assert.match(readFileSync(join(pkg, 'codex.cmd'), 'utf8'), /"%~dp0codex-x86_64-pc-windows-msvc\.exe" %\*/)
+  // The shim is now the `codex` command.
+  assert.deepEqual(findCodexCli(env), [join(pkg, 'codex.cmd')])
+})
+
+test('the hook command reads the same in PowerShell, cmd and bash', () => {
+  const keep = (path: string): string => path
+
+  assert.equal(codexCommand('C:\\cb\\node.exe', 'C:\\cb\\bridge\\src\\ensure.ts', keep), 'C:/cb/node.exe --no-warnings C:/cb/bridge/src/ensure.ts --codex')
+  // No short name for a path with spaces: PowerShell's call form.
+  assert.equal(codexCommand('C:\\a b\\node.exe', 'C:\\cb\\ensure.ts', path => (path.includes(' ') ? null : path)), '& "C:\\a b\\node.exe" --no-warnings "C:\\cb\\ensure.ts" --codex')
+})
+
+test('Codex can run the hook through PowerShell and through cmd, as it does on Windows', { skip: process.platform !== 'win32' }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-shells-'))
+  const bridge = await startBridge({
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
+    saveConfig: () => {},
+    galleryDir: join(root, 'gallery'),
+    uploadsDir: join(root, 'uploads'),
+    docBackupDir: join(root, 'backups'),
+    claudeDir: join(root, 'claude'),
+    log: () => {},
+    bindTailnet: false,
+    read: () => null,
+    modManifest: join(root, 'no-mod.json'),
+  })
+  const home = join(root, 'home')
+  const command = codexCommand(process.execPath, join(import.meta.dirname, '..', 'src', 'ensure.ts'))
+  const run = (program: string, args: string[], verbatim: boolean, id: string): Promise<number | null> =>
+    new Promise(resolve => {
+      const child = spawn(program, args, { windowsVerbatimArguments: verbatim, windowsHide: true, env: { ...process.env, CHOIBUDDY_HOME: home } })
+
+      child.stdin.end(JSON.stringify({ hook_event_name: 'SessionStart', session_id: id, cwd: 'C:/work/app', transcript_path: null, model: 'gpt-5', permission_mode: 'default', source: 'startup' }))
+      child.on('close', resolve)
+    })
+
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ port: bridge.port, token: TOKEN, pcId: 'pc-self', devices: [] }))
+
+  try {
+    // As Codex starts them: `powershell -NoProfile -Command <command>`, `cmd /C "<command>"`.
+    assert.equal(await run('powershell.exe', ['-NoProfile', '-Command', command], false, 'via-powershell'), 0)
+    assert.equal(await run(process.env.ComSpec ?? 'cmd.exe', ['/C', `"${command}"`], true, 'via-cmd'), 0)
+
+    const sessions = objects(arr(parseJsonObject(await (await fetch(`http://127.0.0.1:${bridge.port}/api/snapshot`, { headers: { Authorization: `Bearer ${TOKEN}` } })).text()), 'sessions'))
+
+    assert.deepEqual(sessions.map(session => [str(session, 'id'), str(session, 'agent')]).sort(), [
+      ['via-cmd', 'codex'],
+      ['via-powershell', 'codex'],
+    ])
   } finally {
     await bridge.close()
   }

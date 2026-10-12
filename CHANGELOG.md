@@ -1,5 +1,12 @@
 # 변경 기록
 
+## 0.6.7 (2026-10-12)
+
+- "Codex 연결"을 누를 때 `codex` 명령이 없으면 OpenAI 공식 Codex CLI를 winget으로 먼저 설치해요(이 사용자에게만, 처음엔 1~3분). 그다음 훅을 넣고 `/hooks`와 같은 방법으로 신뢰까지 이어서 해요.
+  - winget은 개발자 모드가 아니면 `codex` 링크를 못 만들어서, 설치 폴더에 `codex.cmd`를 둬 터미널에서 `codex`가 바로 돼요.
+  - Codex 앱(스토어판)이 있으면 신뢰는 그 앱의 codex.exe로 해요. 훅을 실제로 돌리는 쪽이라서요.
+- Codex 훅이 "Failed"로 끝나던 문제를 고쳤어요. Codex는 훅을 세션의 셸(윈도우는 PowerShell)로 돌리는데, 따옴표로 시작하는 명령은 PowerShell에서 문법 오류였어요. 이제 따옴표 없는 슬래시 경로(빈칸이 있으면 짧은 8.3 경로)라서 PowerShell, cmd, bash에서 똑같이 돌아요. 연결된 PC는 브리지가 시작할 때 훅을 고쳐 쓰고 다시 신뢰해요.
+
 ## 0.6.6 (2026-10-12)
 
 - Codex 훅을 자동으로 신뢰해요. "Codex 연결"을 누르면 훅을 넣고, Codex 자체 app-server로 `/hooks` 화면과 같은 방법(`hooks/list` → `config/batchWrite`)으로 ChoiBuddy 훅을 신뢰해 둬요. 신뢰 값(해시)은 Codex가 직접 계산해서 Codex 버전이 바뀌어도 맞아요. 설정에 "연결됐어요" 또는 "신뢰하기" 버튼이 보여요.

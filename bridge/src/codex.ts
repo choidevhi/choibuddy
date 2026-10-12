@@ -2,8 +2,8 @@
 // ChoiBuddy lists its own in ~/.codex/hooks.json; Codex runs them only once
 // the person trusts them in its /hooks screen, so nothing runs behind their back.
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { delimiter, dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { basename, delimiter, dirname, join } from 'node:path'
 import { arr, type Json, type JsonObject, num, obj, objects, parseJsonObject, str } from './json.ts'
 
 // Codex's hook events ChoiBuddy follows.
@@ -18,6 +18,8 @@ const SHORT_EVENTS = new Set(['SessionEnd', 'Interrupt'])
 const SHORT_TIMEOUT_S = 3
 // How long Codex's app-server gets to answer while trusting the hooks.
 const APP_SERVER_MS = 20_000
+// How long installing the Codex CLI may take (it is a large download).
+const INSTALL_MS = 10 * 60_000
 // What marks ChoiBuddy's own entries among the person's hooks.
 const MARK = '--codex'
 
@@ -25,9 +27,30 @@ export function codexHooksPath(codexHome: string): string {
   return join(codexHome, 'hooks.json')
 }
 
-// The command Codex runs: this PC's ChoiBuddy Node and hook script.
-export function codexCommand(node: string, script: string): string {
-  return `"${node}" --no-warnings "${script}" ${MARK}`
+// A Windows path without spaces: its short 8.3 form when it has any (null
+// when the drive keeps no short names).
+function shortPath(path: string): string | null {
+  if (!/\s/.test(path)) return path
+
+  // Handed to cmd as typed: Node's own quoting would escape the inner quotes.
+  const found = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 5000 })
+  const short = found.status === 0 ? found.stdout.trim() : ''
+
+  return short === '' || /\s/.test(short) ? null : short
+}
+
+// The command Codex runs: this PC's ChoiBuddy Node and hook script. Codex
+// hands it to the session's shell (PowerShell on Windows, or cmd, or bash),
+// so it is written to read the same in all three: forward slashes and no
+// quotes (PowerShell takes a quoted path for a string, not a program). A path
+// with spaces goes short; without short names, PowerShell's own form is left.
+export function codexCommand(node: string, script: string, shorten: (path: string) => string | null = shortPath): string {
+  const program = shorten(node)
+  const file = shorten(script)
+
+  if (program === null || file === null) return `& "${node}" --no-warnings "${script}" ${MARK}`
+
+  return `${program.replace(/\\/g, '/')} --no-warnings ${file.replace(/\\/g, '/')} ${MARK}`
 }
 
 function ours(hook: JsonObject): boolean {
@@ -157,21 +180,108 @@ export function fromCodex(raw: JsonObject): boolean {
   return str(raw, 'agent') === 'codex'
 }
 
-// codex.exe: on the PATH (an npm install), else inside the Codex app (Windows
-// Store package). Null when neither is there.
-export function findCodex(env: NodeJS.ProcessEnv = process.env): string | null {
-  for (const dir of (env.PATH ?? env.Path ?? '').split(delimiter)) {
-    const candidate = join(dir, 'codex.exe')
+// The `codex` command people type: a codex.exe on the PATH or in winget's
+// links folder, else a codex.cmd (npm's, or ChoiBuddy's below).
+function findCodexCommand(env: NodeJS.ProcessEnv): string | null {
+  const dirs = [...(env.PATH ?? env.Path ?? '').split(delimiter), join(env.LOCALAPPDATA ?? '', 'Microsoft', 'WinGet', 'Links')]
 
-    if (dir !== '' && existsSync(candidate)) return candidate
+  for (const name of ['codex.exe', 'codex.cmd']) {
+    for (const dir of dirs) {
+      const candidate = join(dir, name)
+
+      if (dir !== '' && existsSync(candidate)) return candidate
+    }
   }
 
+  return null
+}
+
+// Where winget unpacks the Codex CLI. Its link named `codex` needs
+// Developer Mode (a symlink); without it winget only puts this folder on the
+// PATH, where the program is codex-<arch>-pc-windows-msvc.exe.
+function wingetCodex(env: NodeJS.ProcessEnv): string | null {
+  const packages = join(env.LOCALAPPDATA ?? '', 'Microsoft', 'WinGet', 'Packages')
+  let folders: string[] = []
+
+  try {
+    folders = readdirSync(packages).filter(name => name.startsWith('OpenAI.Codex_'))
+  } catch {
+    return null
+  }
+
+  for (const folder of folders) {
+    for (const name of ['codex-x86_64-pc-windows-msvc.exe', 'codex-aarch64-pc-windows-msvc.exe']) {
+      const candidate = join(packages, folder, name)
+
+      if (existsSync(candidate)) return candidate
+    }
+  }
+
+  return null
+}
+
+// The Codex CLI: the `codex` command, else winget's unpacked program. Null
+// without either.
+export function findCodexCli(env: NodeJS.ProcessEnv = process.env): string[] | null {
+  const found = findCodexCommand(env) ?? wingetCodex(env)
+
+  return found === null ? null : [found]
+}
+
+// Makes `codex` work in a terminal after a winget install without its link:
+// a codex.cmd beside the program, in the folder winget put on the PATH.
+export function ensureCodexCommand(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (findCodexCommand(env) !== null) return true
+
+  const program = wingetCodex(env)
+
+  if (program === null) return false
+
+  writeFileSync(join(dirname(program), 'codex.cmd'), `@echo off\r\n"%~dp0${basename(program)}" %*\r\n`)
+
+  return true
+}
+
+// codex.exe inside the Codex app (its Windows Store package). Null without it.
+export function findCodexApp(): string[] | null {
   const found = spawnSync('powershell', ['-NoProfile', '-Command', '(Get-AppxPackage -Name OpenAI.Codex).InstallLocation'], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
   const location = found.status === 0 ? found.stdout.trim() : ''
   const bundled = join(location, 'app', 'resources', 'codex.exe')
 
-  return location !== '' && existsSync(bundled) ? bundled : null
+  return location !== '' && existsSync(bundled) ? [bundled] : null
 }
+
+// Installs OpenAI's Codex CLI (winget package OpenAI.Codex) for this user.
+export function installCodexCli(): Promise<boolean> {
+  return new Promise(resolve => {
+    const child = spawn(
+      'winget',
+      ['install', '--id', 'OpenAI.Codex', '--exact', '--source', 'winget', '--scope', 'user', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity'],
+      { stdio: 'ignore', windowsHide: true },
+    )
+    const timer = setTimeout(() => child.kill(), INSTALL_MS)
+
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve(false)
+    })
+    child.on('exit', code => {
+      clearTimeout(timer)
+      resolve(code === 0 && ensureCodexCommand())
+    })
+  })
+}
+
+// How ChoiBuddy reaches Codex's programs on this PC (stand-ins in tests).
+export type CodexTools = {
+  cli: () => string[] | null
+  app: () => string[] | null
+  install: () => Promise<boolean>
+  // Makes sure typing `codex` works; false when there is no CLI to point at.
+  command: () => boolean
+}
+
+export const CODEX_TOOLS: CodexTools = { cli: findCodexCli, app: findCodexApp, install: installCodexCli, command: ensureCodexCommand }
 
 export type CodexTrust = { ours: number; trusted: number }
 
@@ -184,7 +294,8 @@ export function codexTrust(command: string[], cwd: string, trust: boolean): Prom
   if (program === undefined) return Promise.resolve(null)
 
   return new Promise(resolve => {
-    const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true })
+    // npm's codex.cmd runs through the shell.
+    const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: program.toLowerCase().endsWith('.cmd') })
     const waiting = new Map<number, (reply: JsonObject) => void>()
     let buffered = ''
     let nextId = 1
