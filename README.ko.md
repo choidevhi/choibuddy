@@ -136,4 +136,4 @@ cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRe
 
 ## 라이선스
 
-코드는 [MIT 라이선스](LICENSE)예요. ChoiBuddy 캐릭터 그림(버디 그림, 앱 아이콘, 홍보 이미지)은 MIT에 포함되지 않아요. 자세한 내용은 [LICENSE](LICENSE)를 보세요.
+코드는 [MIT 라이선스](LICENSE)예요. ChoiBuddy 캐릭터 그림(버디 그림, 앱 아이콘, 홍보 이미지)은 MIT에 포함되지 않아요. 자세한 내용은 [ARTWORK.md](ARTWORK.md)를 보세요.

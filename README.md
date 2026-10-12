@@ -136,4 +136,4 @@ To look at the screens without real work, start a bridge on a spare port with `C
 
 ## License
 
-The code is under the [MIT License](LICENSE). The ChoiBuddy character artwork (the buddy drawings, app icons and promo images) is not covered by it; see [LICENSE](LICENSE).
+The code is under the [MIT License](LICENSE). The ChoiBuddy character artwork (the buddy drawings, app icons and promo images) is not covered by it; see [ARTWORK.md](ARTWORK.md).
