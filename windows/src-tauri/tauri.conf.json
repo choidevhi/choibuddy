@@ -10,6 +10,7 @@
     "frontendDist": "../../ui/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -40,6 +41,7 @@
         "skipTaskbar": true,
         "focus": false,
         "focusable": false,
+        "acceptFirstMouse": true,
         "visible": false,
         "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }

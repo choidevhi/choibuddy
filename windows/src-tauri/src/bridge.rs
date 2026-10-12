@@ -2,13 +2,17 @@
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x0000_0008;
+#[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 pub struct Config {
@@ -22,9 +26,35 @@ pub fn home() -> PathBuf {
         return PathBuf::from(dir);
     }
 
-    let profile = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default();
+    let profile = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).unwrap_or_default();
 
     profile.join(".choibuddy")
+}
+
+/// Takes PATH from the person's login shell. Apps opened from Finder start
+/// with /usr/bin:/bin:/usr/sbin:/sbin, which misses node (Homebrew, nvm, ...)
+/// and claude, and the bridge and installer both need them. Interactive too,
+/// since nvm and friends usually load from ~/.zshrc; the markers fence off
+/// anything the shell's startup files print.
+#[cfg(target_os = "macos")]
+pub fn adopt_login_path() {
+    const MARK: &str = "__CHOIBUDDY_PATH__";
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_owned());
+    let Ok(output) = Command::new(shell)
+        .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    if let Some(path) = text.split(MARK).nth(1).filter(|path| !path.is_empty()) {
+        // SAFETY: called first thing in `run`, before any other thread exists.
+        unsafe { std::env::set_var("PATH", path) };
+    }
 }
 
 pub fn read_config(home: &Path) -> Option<Config> {
@@ -80,14 +110,16 @@ pub fn running_version(port: u16) -> Option<String> {
     Some(response[start..end].to_owned())
 }
 
+const NODE: &str = if cfg!(windows) { "node.exe" } else { "node" };
+
 /// The Node the installer copied next to the bridge (the hooks use the same).
 pub fn installed_node(home: &Path) -> PathBuf {
-    home.join("app").join("node").join("node.exe")
+    home.join("app").join("node").join(NODE)
 }
 
 /// The Node this app ships with, so nobody needs one of their own.
 pub fn bundled_node(resource_dir: &Path) -> PathBuf {
-    resource_dir.join("runtime").join("node.exe")
+    resource_dir.join("runtime").join(NODE)
 }
 
 /// The first of `candidates` that exists, else `node` from the PATH (a bridge
@@ -126,11 +158,18 @@ pub fn ensure(home: &Path, bundled: Option<&Path>) -> bool {
 
     candidates.extend(bundled.map(Path::to_path_buf));
 
-    let spawned = node(&candidates)
-        .arg("--no-warnings")
-        .arg(&main)
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-        .spawn();
+    let mut command = node(&candidates);
+
+    command.arg("--no-warnings").arg(&main);
+
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+
+    // Its own process group, so quitting the app does not take it down.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+
+    let spawned = command.spawn();
 
     if spawned.is_err() {
         return false;
@@ -159,7 +198,9 @@ fn run_installer(resource_dir: &Path, when_idle: bool) -> Option<i32> {
     let script = resource_dir.join("bridge").join("src").join("install.ts");
     let mut command = node(&[bundled_node(resource_dir)]);
 
-    command.arg("--no-warnings").arg(script).creation_flags(CREATE_NO_WINDOW);
+    command.arg("--no-warnings").arg(script);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
     if when_idle {
         command.arg("--when-idle");
     }
@@ -231,7 +272,7 @@ mod tests {
     fn runs_the_first_node_that_exists_else_the_one_on_the_path() {
         let dir = tempfile::tempdir().unwrap();
         let installed = installed_node(dir.path());
-        let bundled = dir.path().join("runtime").join("node.exe");
+        let bundled = bundled_node(dir.path());
 
         assert_eq!(node_program(&[installed.clone(), bundled.clone()]), PathBuf::from("node"));
 

@@ -100,7 +100,7 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
                 <span className="folder-text">
                   <span className="folder-name">{t('newSession.custom')}</span>
                   {folder === CUSTOM && (
-                    <input className="field mono" value={custom} placeholder={'C:\\work\\project'} onChange={event => setCustom(event.target.value)} autoFocus />
+                    <input className="field mono" value={custom} placeholder={/Mac/.test(navigator.userAgent) ? '/Users/me/work/project' : 'C:\\work\\project'} onChange={event => setCustom(event.target.value)} autoFocus />
                   )}
                 </span>
               </label>

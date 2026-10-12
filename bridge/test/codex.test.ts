@@ -165,7 +165,7 @@ test('a Codex session shows its steps, asks through the hook script and reads it
     assert.equal(connected?.trusted, true)
     assert.equal(Object.keys(trust ?? {}).length, 10)
     assert.equal(codexConnected(file), true)
-    assert.match(str(objects(arr(objects(arr(obj(file, 'hooks'), 'Stop'))[0] ?? {}, 'hooks'))[0] ?? {}, 'command') ?? '', /^\S+node\.exe --no-warnings \S+ensure\.ts --codex$/i)
+    assert.match(str(objects(arr(objects(arr(obj(file, 'hooks'), 'Stop'))[0] ?? {}, 'hooks'))[0] ?? {}, 'command') ?? '', process.platform === 'win32' ? /^\S+node\.exe --no-warnings \S+ensure\.ts --codex$/i : /^('[^']*\/node'|\S*\/node) --no-warnings ('[^']*\/ensure\.ts'|\S*\/ensure\.ts) --codex$/)
   } finally {
     await bridge.close()
   }
@@ -203,14 +203,14 @@ test("the codex command is found on the PATH, in winget's links or as npm's shim
 
   mkdirSync(npm, { recursive: true })
   mkdirSync(links, { recursive: true })
-  assert.equal(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }), null)
+  assert.equal(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }, 'win32'), null)
 
   writeFileSync(join(npm, 'codex.cmd'), '@echo off')
-  assert.deepEqual(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }), [join(npm, 'codex.cmd')])
+  assert.deepEqual(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }, 'win32'), [join(npm, 'codex.cmd')])
 
   // winget's codex.exe wins over npm's shim, even outside the PATH.
   writeFileSync(join(links, 'codex.exe'), '')
-  assert.deepEqual(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }), [join(links, 'codex.exe')])
+  assert.deepEqual(findCodexCli({ PATH: npm, LOCALAPPDATA: join(root, 'local') }, 'win32'), [join(links, 'codex.exe')])
 })
 
 test("without winget's link, the unpacked program is found and `codex` gets a shim", () => {
@@ -219,22 +219,42 @@ test("without winget's link, the unpacked program is found and `codex` gets a sh
   const env = { PATH: pkg, LOCALAPPDATA: join(root, 'local') }
 
   mkdirSync(pkg, { recursive: true })
-  assert.equal(ensureCodexCommand(env), false)
+  assert.equal(ensureCodexCommand(env, 'win32'), false)
 
   writeFileSync(join(pkg, 'codex-x86_64-pc-windows-msvc.exe'), '')
-  assert.deepEqual(findCodexCli(env), [join(pkg, 'codex-x86_64-pc-windows-msvc.exe')])
-  assert.equal(ensureCodexCommand(env), true)
+  assert.deepEqual(findCodexCli(env, 'win32'), [join(pkg, 'codex-x86_64-pc-windows-msvc.exe')])
+  assert.equal(ensureCodexCommand(env, 'win32'), true)
   assert.match(readFileSync(join(pkg, 'codex.cmd'), 'utf8'), /"%~dp0codex-x86_64-pc-windows-msvc\.exe" %\*/)
   // The shim is now the `codex` command.
-  assert.deepEqual(findCodexCli(env), [join(pkg, 'codex.cmd')])
+  assert.deepEqual(findCodexCli(env, 'win32'), [join(pkg, 'codex.cmd')])
 })
 
 test('the hook command reads the same in PowerShell, cmd and bash', () => {
   const keep = (path: string): string => path
 
-  assert.equal(codexCommand('C:\\cb\\node.exe', 'C:\\cb\\bridge\\src\\ensure.ts', keep), 'C:/cb/node.exe --no-warnings C:/cb/bridge/src/ensure.ts --codex')
+  assert.equal(codexCommand('C:\\cb\\node.exe', 'C:\\cb\\bridge\\src\\ensure.ts', keep, 'win32'), 'C:/cb/node.exe --no-warnings C:/cb/bridge/src/ensure.ts --codex')
   // No short name for a path with spaces: PowerShell's call form.
-  assert.equal(codexCommand('C:\\a b\\node.exe', 'C:\\cb\\ensure.ts', path => (path.includes(' ') ? null : path)), '& "C:\\a b\\node.exe" --no-warnings "C:\\cb\\ensure.ts" --codex')
+  assert.equal(codexCommand('C:\\a b\\node.exe', 'C:\\cb\\ensure.ts', path => (path.includes(' ') ? null : path), 'win32'), '& "C:\\a b\\node.exe" --no-warnings "C:\\cb\\ensure.ts" --codex')
+})
+
+test('on macOS the codex command is `codex` on the PATH, and the hook command is POSIX-quoted', () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-codexmac-'))
+  const bin = join(root, 'bin')
+
+  mkdirSync(bin, { recursive: true })
+  assert.equal(findCodexCli({ PATH: `/nowhere:${bin}` }, 'darwin'), null)
+  // Windows names mean nothing here.
+  writeFileSync(join(bin, 'codex.cmd'), '')
+  assert.equal(findCodexCli({ PATH: bin }, 'darwin'), null)
+  assert.equal(ensureCodexCommand({ PATH: bin }, 'darwin'), false)
+
+  writeFileSync(join(bin, 'codex'), '')
+  assert.deepEqual(findCodexCli({ PATH: `/nowhere:${bin}` }, 'darwin'), [join(bin, 'codex')])
+
+  const never = (): string | null => assert.fail('no short names on macOS')
+
+  assert.equal(codexCommand('/Users/me/.choibuddy/app/node/node', '/Users/me/.choibuddy/app/bridge/src/ensure.ts', never, 'darwin'), '/Users/me/.choibuddy/app/node/node --no-warnings /Users/me/.choibuddy/app/bridge/src/ensure.ts --codex')
+  assert.equal(codexCommand("/Users/Kim Lee/it's/node", '/x/ensure.ts', never, 'darwin'), "'/Users/Kim Lee/it'\\''s/node' --no-warnings /x/ensure.ts --codex")
 })
 
 test('Codex can run the hook through PowerShell and through cmd, as it does on Windows', { skip: process.platform !== 'win32' }, async () => {

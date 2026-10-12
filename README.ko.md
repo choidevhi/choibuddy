@@ -82,6 +82,7 @@ Claude Code ──훅(HTTP)──────▶ 브리지(Node, PC) ──SSE�
    - 브리지와 앱의 Node.js를 `~/.choibuddy/app`에 복사하고 `~/.claude/settings.json`에 훅을 추가해요. 원래 파일은 `settings.json.choibuddy-backup-<시각>`으로 먼저 백업돼요.
    - 동반 mod도 설치해요. 이미 열려 있던 세션은 대화 화면에 "플러그인 다시 불러오기" 버튼이 떠요(터미널에서 `/reload-plugins`를 쳐도 돼요).
    - 설치 파일에 코드 서명이 없어요. SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누르세요.
+   - **macOS**(아직 릴리스 없음): 이 저장소에서 직접 빌드하고([빌드](#빌드) 참고), `.dmg`를 열어 ChoiBuddy를 응용 프로그램 폴더로 끌어다 놓아요. 서명이 없는 앱이라 처음에는 우클릭 → **열기**로 여세요. 맥용 앱에도 Node.js 24가 들어 있어요. Tailscale **설치**는 다운로드 페이지를 열어 줘요. 내장 브라우저와 앱 안 자동 업데이트는 윈도우에서만 돼요. 새 세션을 처음 열 때 macOS가 Terminal 제어를 허용할지 물어봐요.
 2. **휴대폰.**
    - `ChoiBuddy-<버전>.apk`를 설치해요. 브라우저나 파일 앱의 설치 허용을 물으면 허용해 주세요.
    - 윈도우 앱 **＋** 탭에서 **연결 코드 만들기**를 누르고, 나온 QR을 휴대폰 앱으로 찍어요.
@@ -142,7 +143,7 @@ corepack pnpm uninstall-bridge   # 훅을 지우고 브리지를 멈춤
 corepack pnpm test         # 브리지 테스트
 corepack pnpm typecheck    # 브리지 + 화면 타입 검사
 corepack pnpm build        # 화면 빌드 (ui/dist)
-corepack pnpm tauri build  # 윈도우 설치 파일 (먼저 Node.js를 windows/src-tauri/runtime에 받아 고정된 SHA-256으로 확인)
+corepack pnpm tauri build  # 윈도우 설치 파일, macOS에서는 .app과 .dmg (먼저 그 OS용 Node.js를 windows/src-tauri/runtime에 받아 고정된 SHA-256으로 확인)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JAVA_HOME은 JDK 21

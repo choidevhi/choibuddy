@@ -8,16 +8,23 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, PhysicalRect, WebviewWindow};
 
+#[cfg(windows)]
 #[link(name = "user32")]
 unsafe extern "system" {
     fn SetWindowPos(hwnd: isize, insert_after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
 }
 
+#[cfg(windows)]
 const SWP_NOZORDER: u32 = 0x0004;
+#[cfg(windows)]
 const SWP_NOACTIVATE: u32 = 0x0010;
 // Don't copy the old picture into the resized window: it would show the buddy
 // shifted for a frame until the page draws again.
+#[cfg(windows)]
 const SWP_NOCOPYBITS: u32 = 0x0100;
+// macOS keeps window frames in points, so a position set in pixels on a
+// Retina screen can come back a pixel off.
+const LAID_SLACK: i32 = if cfg!(windows) { 0 } else { 2 };
 const MARGIN: f64 = 10.0;
 const SAVE_EVERY: Duration = Duration::from_millis(400);
 
@@ -128,9 +135,15 @@ pub fn layout(window: &WebviewWindow, state: &FloatState, width: f64, height: f6
     let w = (width * scale).round().max(1.0) as i32;
     let h = (height * scale).round().max(1.0) as i32;
     let at = place(anchor, w, h, &area);
-    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     *state.laid.lock().map_err(|error| error.to_string())? = Some(at);
+
+    set_frame(window, at, w, h)
+}
+
+#[cfg(windows)]
+fn set_frame(window: &WebviewWindow, at: Point, w: i32, h: i32) -> Result<(), String> {
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     // SAFETY: a valid top-level window handle from Tauri; flags keep z-order and focus as they are.
     let moved = unsafe { SetWindowPos(hwnd.0 as isize, 0, at.x, at.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS) };
@@ -142,6 +155,18 @@ pub fn layout(window: &WebviewWindow, state: &FloatState, width: f64, height: f6
     Ok(())
 }
 
+// Two steps here. `moved` reads where the window ended up, not where an event
+// says it was, so the step in between never reaches the anchor.
+#[cfg(not(windows))]
+fn set_frame(window: &WebviewWindow, at: Point, w: i32, h: i32) -> Result<(), String> {
+    let (Ok(width), Ok(height)) = (u32::try_from(w), u32::try_from(h)) else {
+        return Err("bad size".to_owned());
+    };
+
+    window.set_size(tauri::PhysicalSize::new(width, height)).map_err(|error| error.to_string())?;
+    window.set_position(tauri::PhysicalPosition::new(at.x, at.y)).map_err(|error| error.to_string())
+}
+
 /// Called when the window moved: by the person dragging it, or by our own
 /// layout (which lands on the same anchor). Remembers the new corner.
 pub fn moved(window: &WebviewWindow, state: &FloatState) {
@@ -151,7 +176,7 @@ pub fn moved(window: &WebviewWindow, state: &FloatState) {
 
     let laid = state.laid.lock().map(|laid| *laid).unwrap_or(None);
 
-    if laid == Some(Point { x: position.x, y: position.y }) {
+    if laid.is_some_and(|laid| (laid.x - position.x).abs() <= LAID_SLACK && (laid.y - position.y).abs() <= LAID_SLACK) {
         return;
     }
 

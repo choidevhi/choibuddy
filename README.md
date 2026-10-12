@@ -82,6 +82,7 @@ Steps:
    - It copies the bridge and the app's Node.js to `~/.choibuddy/app` and adds hooks to `~/.claude/settings.json`. The original file is backed up first as `settings.json.choibuddy-backup-<time>`.
    - It also installs the companion mod. Sessions that were already open show a "Reload plugins" button in the chat (or run `/reload-plugins` in them).
    - The installer is not code-signed. If SmartScreen warns, choose **More info → Run anyway**.
+   - **macOS** (no release yet): build it from this repository (see [Building](#building)), open the `.dmg` and drag ChoiBuddy to Applications. The app is not signed, so open it the first time with right-click → **Open**. The Mac app brings its own Node.js 24 too. **Install** for Tailscale opens its download page. The in-app browser and in-app updates are Windows only. The first time you open a new session, macOS asks to let ChoiBuddy control Terminal.
 2. **Phone.**
    - Install `ChoiBuddy-<version>.apk`; Android asks you to allow installs from your browser or file app.
    - In the Windows app, open the **＋** tab, press **Create a pairing code** and scan the QR with the phone app.
@@ -142,7 +143,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 corepack pnpm test         # bridge tests
 corepack pnpm typecheck    # bridge and screens
 corepack pnpm build        # screens (ui/dist)
-corepack pnpm tauri build  # Windows installer (first fetches Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256)
+corepack pnpm tauri build  # Windows installer, or on macOS the .app and .dmg (first fetches that OS's Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JDK 21 in JAVA_HOME

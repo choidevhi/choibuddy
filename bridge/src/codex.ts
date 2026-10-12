@@ -3,7 +3,7 @@
 // the person trusts them in its /hooks screen, so nothing runs behind their back.
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { basename, delimiter, dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { arr, type Json, type JsonObject, num, obj, objects, parseJsonObject, str } from './json.ts'
 
 // Codex's hook events ChoiBuddy follows.
@@ -44,7 +44,14 @@ function shortPath(path: string): string | null {
 // so it is written to read the same in all three: forward slashes and no
 // quotes (PowerShell takes a quoted path for a string, not a program). A path
 // with spaces goes short; without short names, PowerShell's own form is left.
-export function codexCommand(node: string, script: string, shorten: (path: string) => string | null = shortPath): string {
+export function codexCommand(node: string, script: string, shorten: (path: string) => string | null = shortPath, platform: NodeJS.Platform = process.platform): string {
+  // macOS and Linux: a POSIX shell, where single quotes keep a path whole.
+  if (platform !== 'win32') {
+    const quote = (path: string): string => (/[^\w@%+=:,./-]/.test(path) ? `'${path.replace(/'/g, `'\\''`)}'` : path)
+
+    return `${quote(node)} --no-warnings ${quote(script)} ${MARK}`
+  }
+
   const program = shorten(node)
   const file = shorten(script)
 
@@ -181,11 +188,13 @@ export function fromCodex(raw: JsonObject): boolean {
 }
 
 // The `codex` command people type: a codex.exe on the PATH or in winget's
-// links folder, else a codex.cmd (npm's, or ChoiBuddy's below).
-function findCodexCommand(env: NodeJS.ProcessEnv): string | null {
-  const dirs = [...(env.PATH ?? env.Path ?? '').split(delimiter), join(env.LOCALAPPDATA ?? '', 'Microsoft', 'WinGet', 'Links')]
+// links folder, else a codex.cmd (npm's, or ChoiBuddy's below). On macOS,
+// `codex` on the PATH (npm's or Homebrew's).
+function findCodexCommand(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | null {
+  const windows = platform === 'win32'
+  const dirs = [...(env.PATH ?? env.Path ?? '').split(windows ? ';' : ':'), ...(windows ? [join(env.LOCALAPPDATA ?? '', 'Microsoft', 'WinGet', 'Links')] : [])]
 
-  for (const name of ['codex.exe', 'codex.cmd']) {
+  for (const name of windows ? ['codex.exe', 'codex.cmd'] : ['codex']) {
     for (const dir of dirs) {
       const candidate = join(dir, name)
 
@@ -222,16 +231,17 @@ function wingetCodex(env: NodeJS.ProcessEnv): string | null {
 
 // The Codex CLI: the `codex` command, else winget's unpacked program. Null
 // without either.
-export function findCodexCli(env: NodeJS.ProcessEnv = process.env): string[] | null {
-  const found = findCodexCommand(env) ?? wingetCodex(env)
+export function findCodexCli(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string[] | null {
+  const found = findCodexCommand(env, platform) ?? (platform === 'win32' ? wingetCodex(env) : null)
 
   return found === null ? null : [found]
 }
 
 // Makes `codex` work in a terminal after a winget install without its link:
 // a codex.cmd beside the program, in the folder winget put on the PATH.
-export function ensureCodexCommand(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (findCodexCommand(env) !== null) return true
+export function ensureCodexCommand(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): boolean {
+  if (findCodexCommand(env, platform) !== null) return true
+  if (platform !== 'win32') return false
 
   const program = wingetCodex(env)
 
@@ -244,6 +254,8 @@ export function ensureCodexCommand(env: NodeJS.ProcessEnv = process.env): boolea
 
 // codex.exe inside the Codex app (its Windows Store package). Null without it.
 export function findCodexApp(): string[] | null {
+  if (process.platform !== 'win32') return null
+
   const found = spawnSync('powershell', ['-NoProfile', '-Command', '(Get-AppxPackage -Name OpenAI.Codex).InstallLocation'], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
   const location = found.status === 0 ? found.stdout.trim() : ''
   const bundled = join(location, 'app', 'resources', 'codex.exe')
@@ -252,7 +264,10 @@ export function findCodexApp(): string[] | null {
 }
 
 // Installs OpenAI's Codex CLI (winget package OpenAI.Codex) for this user.
+// Windows only: on macOS the person installs it (npm i -g @openai/codex).
 export function installCodexCli(): Promise<boolean> {
+  if (process.platform !== 'win32') return Promise.resolve(false)
+
   return new Promise(resolve => {
     const child = spawn(
       'winget',

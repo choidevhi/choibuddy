@@ -83,13 +83,28 @@ test('commands wait for the mod, are handed over once and leave the queue with t
 test('a terminal is picked in order: WezTerm, Windows Terminal, cmd', () => {
   const env = { ProgramFiles: 'C:\\PF', LOCALAPPDATA: 'C:\\LA', ComSpec: 'C:\\Windows\\cmd.exe' }
 
-  assert.equal(pickTerminal(env, () => true).name, 'WezTerm')
-  assert.deepEqual(pickTerminal(env, () => true).args('C:\\work', ['claude']), ['start', '--cwd', 'C:\\work', '--', 'claude'])
+  assert.equal(pickTerminal(env, () => true, 'win32').name, 'WezTerm')
+  assert.deepEqual(pickTerminal(env, () => true, 'win32').args('C:\\work', ['claude']), ['start', '--cwd', 'C:\\work', '--', 'claude'])
   // A plain terminal: the shell only.
-  assert.deepEqual(pickTerminal(env, () => true).args('C:\\work', []), ['start', '--cwd', 'C:\\work'])
-  assert.deepEqual(pickTerminal(env, path => path.endsWith('wt.exe')).args('C:\\work', []), ['-d', 'C:\\work'])
-  assert.equal(pickTerminal(env, path => path.endsWith('wt.exe')).name, 'Windows Terminal')
-  assert.equal(pickTerminal(env, () => false).name, 'cmd')
+  assert.deepEqual(pickTerminal(env, () => true, 'win32').args('C:\\work', []), ['start', '--cwd', 'C:\\work'])
+  assert.deepEqual(pickTerminal(env, path => path.endsWith('wt.exe'), 'win32').args('C:\\work', []), ['-d', 'C:\\work'])
+  assert.equal(pickTerminal(env, path => path.endsWith('wt.exe'), 'win32').name, 'Windows Terminal')
+  assert.equal(pickTerminal(env, () => false, 'win32').name, 'cmd')
+})
+
+test('on macOS a terminal is picked in order: WezTerm, Terminal', () => {
+  assert.equal(pickTerminal({}, () => true, 'darwin').name, 'WezTerm')
+  assert.deepEqual(pickTerminal({}, () => true, 'darwin').args('/w', []), ['start', '--cwd', '/w'])
+
+  const terminal = pickTerminal({}, () => false, 'darwin')
+  const args = terminal.args('/Users/me/it\'s "here"', ['claude'])
+
+  assert.equal(terminal.name, 'Terminal')
+  assert.equal(terminal.program, '/usr/bin/osascript')
+  // The folder and the command are separate arguments, quoted by AppleScript, never part of the script.
+  assert.deepEqual(args.slice(-2), ['/Users/me/it\'s "here"', 'claude'])
+  assert.ok(args.slice(0, -2).every(arg => !arg.includes('/Users/me')))
+  assert.equal(terminal.args('/w', []).at(-1), '/w')
 })
 
 test('the first prompt goes to the session that opens in that folder afterwards', () => {

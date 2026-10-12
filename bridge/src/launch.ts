@@ -13,8 +13,35 @@ export type Terminal = {
   args: (cwd: string, command: string[]) => string[]
 }
 
-// Which terminal to use, best first: WezTerm, Windows Terminal, then plain cmd.
-export function pickTerminal(env: NodeJS.ProcessEnv, exists: (path: string) => boolean): Terminal {
+// Which terminal to use, best first.
+// Windows: WezTerm, Windows Terminal, then plain cmd.
+// macOS: WezTerm, then Terminal.app. Terminal is driven with AppleScript; the
+// folder and the command go in as arguments and `quoted form of` quotes each
+// for the shell, so none of them is ever read as code. The first time, macOS
+// asks to let ChoiBuddy control Terminal.
+export function pickTerminal(env: NodeJS.ProcessEnv, exists: (path: string) => boolean, platform: NodeJS.Platform = process.platform): Terminal {
+  if (platform === 'darwin') {
+    const wezterm = '/Applications/WezTerm.app/Contents/MacOS/wezterm'
+
+    if (exists(wezterm)) return { name: 'WezTerm', program: wezterm, args: (cwd, command) => ['start', '--cwd', cwd, ...(command.length > 0 ? ['--', ...command] : [])] }
+
+    const script = [
+      'on run argv',
+      'set shellLine to "cd " & quoted form of (item 1 of argv)',
+      'if (count of argv) > 1 then set shellLine to shellLine & " &&"',
+      'repeat with i from 2 to count of argv',
+      'set shellLine to shellLine & " " & quoted form of (item i of argv)',
+      'end repeat',
+      'tell application "Terminal"',
+      'activate',
+      'do script shellLine',
+      'end tell',
+      'end run',
+    ]
+
+    return { name: 'Terminal', program: '/usr/bin/osascript', args: (cwd, command) => [...script.flatMap(line => ['-e', line]), cwd, ...command] }
+  }
+
   const programFiles = env.ProgramFiles ?? 'C:\\Program Files'
   const wezterm = join(programFiles, 'WezTerm', 'wezterm.exe')
 

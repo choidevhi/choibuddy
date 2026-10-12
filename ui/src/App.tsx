@@ -33,7 +33,7 @@ import {
 import { ConnectionContext, fetchCommands, type LinkState, sendDecision, sendPrompt, type Uploaded, uploadFile } from './live.ts'
 import { NewSessionSheet } from './newsession.tsx'
 import { PendingSheet } from './pending.tsx'
-import { platform, readPref, windowsShell } from './platform.ts'
+import { hasBrowser, platform, readPref, windowsShell } from './platform.ts'
 import { ON_OFF, usePref } from './prefs.ts'
 import { playChime } from './sound.ts'
 
@@ -439,7 +439,7 @@ export function App() {
               <button type="button" className={activeTab === 'gallery' ? 'on' : ''} onClick={() => openTab('gallery')} title={t('tab.gallery')}>
                 <ImageIcon size={17} />
               </button>
-              {platform === 'windows' && (
+              {hasBrowser && (
                 <button type="button" className={activeTab === 'browser' ? 'on' : ''} onClick={() => openTab('browser')} title={t('tab.browser')}>
                   <GlobeIcon size={17} />
                 </button>

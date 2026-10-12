@@ -1,4 +1,8 @@
 mod bridge;
+#[cfg(windows)]
+mod browser;
+#[cfg(not(windows))]
+#[path = "browser_stub.rs"]
 mod browser;
 mod float;
 mod tailscale;
@@ -93,7 +97,9 @@ fn open_tailscale() -> bool {
 fn open_release_page(url: String) -> bool {
     let ours = url.starts_with("https://github.com/choidevhi/choibuddy/") && !url.contains(['"', ' ', '&', '|', '^', '<', '>']);
 
-    ours && std::process::Command::new("explorer").arg(&url).spawn().is_ok()
+    let opener = if cfg!(windows) { "explorer" } else { "open" };
+
+    ours && std::process::Command::new(opener).arg(&url).spawn().is_ok()
 }
 
 /// Downloads a release installer and quits; a helper installs it and starts
@@ -230,6 +236,10 @@ fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
 }
 
 pub fn run() {
+    // A macOS app opened from Finder gets a bare PATH without node or claude.
+    #[cfg(target_os = "macos")]
+    bridge::adopt_login_path();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show(app)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
@@ -285,6 +295,12 @@ pub fn run() {
                 window.set_resizable(true)?;
             }
 
+            // A HUD: the buddy stays on every Space and over full-screen apps.
+            #[cfg(target_os = "macos")]
+            if let Some(float_window) = app.get_webview_window("float") {
+                float_window.set_visible_on_all_workspaces(true)?;
+            }
+
             // Menu events reach every menu handler in the app (the buddy's menu
             // too, and on macOS the menu bar), so each menu's ids carry its own
             // prefix: plain words like "quit" or "open" would clash.
@@ -323,7 +339,7 @@ pub fn run() {
             tray.build(app)?;
             app.on_menu_event(|app, event| on_float_menu(app, event.id.as_ref()));
 
-            // Started by Windows at sign-in: stay in the tray, keep the bridge up.
+            // Started at sign-in: stay in the tray, keep the bridge up.
             if !std::env::args().any(|arg| arg == "--hidden") {
                 show(app.handle());
             }
@@ -359,9 +375,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("ChoiBuddy를 시작하지 못했습니다")
-        .run(|app, event| {
-            if let RunEvent::Exit = event {
-                float::flush(&app.state::<FloatState>());
-            }
+        .run(|app, event| match event {
+            RunEvent::Exit => float::flush(&app.state::<FloatState>()),
+            // Clicking the Dock icon brings back a widget hidden with its close button.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show(app),
+            _ => {}
         });
 }
