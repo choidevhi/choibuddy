@@ -169,6 +169,7 @@ export type Conversation = {
 // A session found on disk (any time) or live right now.
 export type HistoryEntry = {
   sessionId: string
+  agent: AgentKind
   project: string
   cwd: string
   title: string
@@ -180,8 +181,13 @@ export type HistoryEntry = {
 
 export type SessionStatus = 'thinking' | 'working' | 'waiting' | 'done' | 'idle' | 'error' | 'ended'
 
+// Which coding agent runs the session. Codex reports through its hooks only:
+// no prompts, commands or live text from a device.
+export type AgentKind = 'claude' | 'codex'
+
 export type Session = {
   id: string
+  agent: AgentKind
   name: string
   cwd: string
   status: SessionStatus

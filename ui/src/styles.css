@@ -4140,3 +4140,17 @@ body.resizing--column {
   min-width: 0;
   color: var(--text);
 }
+
+/* Codex sessions carry a small tag */
+
+.agent-chip {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}

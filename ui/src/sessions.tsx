@@ -86,6 +86,7 @@ export function useHistory(feeds: Feed[], sessions: PcSession[]): { entries: PcE
       ? history
       : sessions.map(session => ({
           sessionId: session.id,
+          agent: session.agent,
           project: session.name,
           cwd: session.cwd,
           title: '',
@@ -385,7 +386,10 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
     >
       <span className={`status-dot convo-dot dot--${statusOf(entry)}`} />
       <span className="convo-item-text">
-        <span className="convo-title">{titleOf(entry)}</span>
+        <span className="convo-title">
+          {entry.agent === 'codex' && <span className="agent-chip">Codex</span>}
+          {titleOf(entry)}
+        </span>
         <span className="convo-meta">{metaOf(entry)}</span>
       </span>
     </button>

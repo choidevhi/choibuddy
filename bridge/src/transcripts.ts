@@ -4,7 +4,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ChatMessage, ChatRole, Conversation, HistoryEntry } from '../../shared/protocol.ts'
-import { bool, type Json, type JsonObject, obj, objects, parseJsonObject, str } from './json.ts'
+import { arr, bool, type Json, type JsonObject, obj, objects, parseJsonObject, str } from './json.ts'
 import { baseName } from './previews.ts'
 import { moveInto } from './trash.ts'
 
@@ -35,6 +35,15 @@ export function userText(content: string): string | null {
   const text = content.replace(SYSTEM_TAGS, '').trim()
 
   return text === '' ? null : text
+}
+
+// Codex wraps a prompt with attachments in a list of the files; only the
+// request after it is what the person typed.
+export function codexUserText(text: string): string {
+  const marker = '## My request:'
+  const at = text.lastIndexOf(marker)
+
+  return (text.trimStart().startsWith('# Files mentioned by the user') && at !== -1 ? text.slice(at + marker.length) : text).trim()
 }
 
 function textBlocks(content: Json | undefined): string {
@@ -139,6 +148,14 @@ export class TranscriptReader {
 
     this.cwd ??= str(line, 'cwd')
 
+    // Codex's rollout files: the folder in the session's first line, the
+    // conversation in finished user and agent message items.
+    if (type === 'session_meta' || type === 'event_msg') {
+      this.#codexLine(type, obj(line, 'payload'), stamp(line))
+
+      return
+    }
+
     if (type === 'custom-title') this.title = str(line, 'customTitle') ?? str(line, 'title') ?? this.title
     if (type === 'ai-title' && this.title === null) this.title = str(line, 'aiTitle')
     if (type === 'summary' && this.title === null) this.title = str(line, 'summary')
@@ -172,6 +189,30 @@ export class TranscriptReader {
 
       if (text !== '') this.#push('assistant', text, stamp(line), id, str(message, 'id'))
     }
+  }
+
+  #codexLine(type: string, payload: JsonObject | null, at: number): void {
+    if (type === 'session_meta') {
+      this.cwd ??= str(payload, 'cwd')
+
+      return
+    }
+
+    const item = str(payload, 'type') === 'item_completed' ? obj(payload, 'item') : null
+    const kind = str(item, 'type')
+
+    if (kind !== 'UserMessage' && kind !== 'AgentMessage') return
+
+    // User blocks say "text", agent blocks "Text".
+    const said = objects(arr(item, 'content'))
+      .flatMap(block => (str(block, 'type')?.toLowerCase() === 'text' ? [str(block, 'text') ?? ''] : []))
+      .join('\n\n')
+    const text = kind === 'UserMessage' ? codexUserText(said) : said.trim()
+    const id = str(item, 'id') ?? `${this.messages.length}`
+
+    if (text === '') return
+    if (kind === 'UserMessage') this.#firstPrompt ??= text
+    this.#push(kind === 'UserMessage' ? 'user' : 'assistant', text, at, id, null)
   }
 
   get bestTitle(): string {
@@ -288,7 +329,7 @@ export class Transcripts {
         const glance = glanceAt(file.path)
         const cwd = glance.cwd ?? ''
 
-        return { sessionId: file.sessionId, project: cwd === '' ? '' : baseName(cwd), cwd, title: glance.title, updatedAt: file.mtime, live: false, archived: false }
+        return { sessionId: file.sessionId, agent: 'claude', project: cwd === '' ? '' : baseName(cwd), cwd, title: glance.title, updatedAt: file.mtime, live: false, archived: false }
       })
   }
 }

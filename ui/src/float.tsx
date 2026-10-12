@@ -351,7 +351,7 @@ export function FloatApp() {
     <I18nContext.Provider value={{ lang, t }}>
       <div className="float" ref={root}>
         <div className="fb-stack">
-          {hover && <StatsBubble session={current} limits={current === null ? null : (merged.limits.get(current.pcKey) ?? null)} now={now} t={t} />}
+          {hover && <StatsBubble session={current} limits={current === null || current.agent === 'codex' ? null : (merged.limits.get(current.pcKey) ?? null)} now={now} t={t} />}
           {liveEvents.map(item => (
             <button type="button" key={item.id} className={`fb fb--${item.kind}`} onClick={() => void windowsShell.showMain()}>
               <span className="fb-kicker">

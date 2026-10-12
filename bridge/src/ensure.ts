@@ -2,14 +2,23 @@
 // It starts the bridge when it is down and, with --forward, hands the hook's
 // stdin to it. It must print nothing: SessionStart output would be added to
 // the model's context.
+//
+// Codex runs it for all of its hooks with --codex: the hook is handed over
+// marked as Codex's, and for an approval the bridge's answer is printed in
+// Codex's form once the person decides.
 import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { codexAnswer } from './codex.ts'
 import { loadConfig, log } from './config.ts'
+import { parseJsonObject, str } from './json.ts'
 
 const config = loadConfig()
 const base = `http://127.0.0.1:${config.port}`
-const forward = process.argv.includes('--forward')
+const codex = process.argv.includes('--codex')
+const forward = codex || process.argv.includes('--forward')
+// An approval is held by the bridge for up to 590 s.
+const APPROVAL_WAIT_MS = 595_000
 
 async function isUp(): Promise<boolean> {
   try {
@@ -68,7 +77,21 @@ try {
     up = await waitUp(3000)
   }
 
-  if (forward && up && payload.trim() !== '') {
+  const hook = payload.trim() === '' ? null : parseJsonObject(payload)
+
+  if (codex && up && hook !== null) {
+    const asking = str(hook, 'hook_event_name') === 'PermissionRequest'
+    const res = await fetch(`${base}/hook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...hook, agent: 'codex' }),
+      signal: AbortSignal.timeout(asking ? APPROVAL_WAIT_MS : 2000),
+    })
+    const answer = asking ? codexAnswer(parseJsonObject(await res.text())) : ''
+
+    // Written out before the exit below cuts the process short.
+    if (answer !== '') await new Promise<void>(resolve => process.stdout.write(answer, () => resolve()))
+  } else if (forward && up && payload.trim() !== '') {
     await fetch(`${base}/hook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

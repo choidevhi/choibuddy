@@ -354,6 +354,27 @@ export async function openTerminal(connection: Connection, cwd: string): Promise
   return (await post(connection, '/api/terminal/open', { cwd }))?.ok === true
 }
 
+export type CodexState = { installed: boolean; connected: boolean }
+
+function codexStateOf(body: { installed?: boolean; connected?: boolean } | null): CodexState | null {
+  return body === null || typeof body.installed !== 'boolean' || typeof body.connected !== 'boolean' ? null : { installed: body.installed, connected: body.connected }
+}
+
+// Codex on the PC, and whether ChoiBuddy's hooks are in its hooks.json.
+export async function fetchCodex(connection: Connection): Promise<CodexState | null> {
+  const res = await fetch(`${connection.baseUrl}/api/codex`, { headers: authHeaders(connection) }).catch(() => null)
+  const body: { installed?: boolean; connected?: boolean } | null = res?.ok === true ? await res.json().catch(() => null) : null
+
+  return codexStateOf(body)
+}
+
+export async function setCodex(connection: Connection, on: boolean): Promise<CodexState | null> {
+  const res = await fetch(`${connection.baseUrl}/api/codex`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ on }) }).catch(() => null)
+  const body: { installed?: boolean; connected?: boolean } | null = res?.ok === true ? await res.json().catch(() => null) : null
+
+  return codexStateOf(body)
+}
+
 // Replies in another language are asked again in `lang` (null: off).
 export async function setAutoLanguage(connection: Connection, lang: string | null): Promise<boolean> {
   return (await post(connection, '/api/auto-language', { lang: lang ?? '' }))?.ok === true

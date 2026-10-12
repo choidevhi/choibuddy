@@ -1,4 +1,5 @@
 import type {
+  AgentKind,
   Agent,
   Alert,
   AlertType,
@@ -22,6 +23,7 @@ import type {
 import { PROTOCOL_VERSION } from '../../shared/protocol.ts'
 import { type Gallery, imageMime, inlineImages } from './gallery.ts'
 import { arr, bool, type Json, type JsonObject, num, obj, objects, str } from './json.ts'
+import { fromCodex } from './codex.ts'
 import { baseName, type FileReader, kindOf, resultPreview, stepTitle, todosOf, toolPreview } from './previews.ts'
 
 const MAX_STEPS = 40
@@ -179,21 +181,32 @@ export class Store {
         existing.name = baseName(input.cwd)
       }
       if (input.mode !== null) existing.mode = input.mode
+      if (fromCodex(input.raw)) existing.agent = 'codex'
+      this.#codexModel(existing, input.raw)
 
       return existing
     }
 
-    const session = this.#create(input.sessionId, input.cwd, input.mode ?? 'default', now)
+    const session = this.#create(input.sessionId, input.cwd, input.mode ?? 'default', now, fromCodex(input.raw) ? 'codex' : 'claude')
 
     this.sessions.set(session.id, session)
+    this.#codexModel(session, input.raw)
 
     return session
   }
 
-  #create(id: string, cwd: string, mode: string, at: number): Session {
+  // Codex has no mod to report usage; its hooks name the model at least.
+  #codexModel(session: Session, raw: JsonObject): void {
+    const model = str(raw, 'model')
+
+    if (session.agent === 'codex' && model !== null && model !== session.usage?.model) session.usage = { ...this.#usageOf(session), model }
+  }
+
+  #create(id: string, cwd: string, mode: string, at: number, agent: AgentKind = 'claude'): Session {
     return {
       id,
-      name: cwd === '' ? 'Claude' : baseName(cwd),
+      agent,
+      name: cwd === '' ? (agent === 'codex' ? 'Codex' : 'Claude') : baseName(cwd),
       cwd,
       status: 'idle',
       mode,
@@ -510,6 +523,13 @@ export class Store {
           }
         }
         session.subagents = session.agents.filter(item => item.status === 'running').length
+        break
+      }
+      // Codex: the person stopped the turn.
+      case 'Interrupt': {
+        this.#settle(session)
+        cleared = this.#clearPending(session.id, () => true)
+        session.status = 'idle'
         break
       }
       case 'SessionEnd': {

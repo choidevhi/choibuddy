@@ -6,7 +6,7 @@ import { showToast } from './confirm.tsx'
 import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
 import { ago, duration, isLang, type Lang, LANGS, type MessageKey, type Translate, useI18n } from './i18n.ts'
 import { CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
-import { createDevice, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setTrustTailnet, type SetupStatus } from './live.ts'
+import { type CodexState, createDevice, fetchCodex, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setCodex, setTrustTailnet, type SetupStatus } from './live.ts'
 import { parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
@@ -281,6 +281,43 @@ function Guide({ localFeed }: { localFeed: Feed | null }) {
           )}
         </>
       )}
+      {platform === 'windows' && localFeed !== null && <CodexRow feed={localFeed} />}
+    </div>
+  )
+}
+
+// Codex on this PC: ChoiBuddy lists its hooks in Codex's hooks.json; Codex
+// runs them once the person trusts them in its /hooks screen.
+function CodexRow({ feed }: { feed: Feed }) {
+  const { t } = useI18n()
+  const [state, setState] = useState<CodexState | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void fetchCodex(feed.connection).then(setState)
+  }, [feed.connection.token])
+
+  if (state === null || !state.installed) return null
+
+  const change = async (on: boolean): Promise<void> => {
+    setBusy(true)
+
+    const next = await setCodex(feed.connection, on)
+
+    setBusy(false)
+    if (next === null) showToast(t('chat.actionFailed'))
+    else setState(next)
+  }
+
+  return (
+    <div className="row codex-row">
+      <span className="row-text">
+        <span>{t('codex.title')}</span>
+        <span className="row-hint">{state.connected ? t('codex.trust') : t('codex.hint')}</span>
+      </span>
+      <button type="button" className={`btn small ${state.connected ? '' : 'btn--allow'}`} disabled={busy} onClick={() => void change(!state.connected)}>
+        {state.connected ? t('codex.disconnect') : t('codex.connect')}
+      </button>
     </div>
   )
 }

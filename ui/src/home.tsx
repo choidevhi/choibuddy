@@ -179,6 +179,9 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
   // Claude writing its answer (no tool yet): shown as it comes, word by word.
   const replying =
     writing === null && stream !== null && stream.toolUseId === null && busy && now - stream.at < LIVE_MS && stream.text.trim() !== '' ? stream : null
+  // Codex names its model in its hooks (as it is); Claude's reads as "Opus 5.5".
+  const model = session?.usage?.model ?? null
+  const agentLine = session?.agent === 'codex' ? (model === null ? 'Codex' : `Codex · ${model}`) : (modelLabel(model) ?? 'Claude Code')
 
   return (
     <div className={`home ${compact ? 'home--compact' : ''} ${short ? 'home--short' : ''}`}>
@@ -189,7 +192,7 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
         <div className="who">
           <SessionPicker session={session} sessions={sessions} onPick={onPick} onNewSession={onNewSession} />
           <div className="who-sub">
-            {modelLabel(session?.usage?.model ?? null) ?? 'Claude Code'}
+            {agentLine}
             {session !== null && session.subagents > 0 && <span className="pill">{t('home.agents', { n: session.subagents })}</span>}
           </div>
         </div>
@@ -259,7 +262,8 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
         {session !== null && <AgentLane agents={session.agents} selectedId={agentId} tone={tone} now={now} onSelect={setAgentId} />}
         {session !== null && <Composer session={session} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact />}
       </section>
-      <UsageStrip usage={session?.usage ?? null} limits={limits} now={now} lead={session === null ? null : <ModelControl session={session} onSend={onSend} />} />
+      {/* Codex reports no usage, and the limits and model menu are Claude's. */}
+      {session?.agent !== 'codex' && <UsageStrip usage={session?.usage ?? null} limits={limits} now={now} lead={session === null ? null : <ModelControl session={session} onSend={onSend} />} />}
     </div>
   )
 }

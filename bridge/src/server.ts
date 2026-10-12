@@ -2,12 +2,14 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { homedir, hostname, networkInterfaces } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, DEFAULT_PORT, type HistoryEntry, type LiveStream, type Project, PROMPT_MODES, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
 import { type Config, type Device, hashToken, newToken, VERSION } from './config.ts'
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
+import { codexCommand, codexState, setCodexHooks } from './codex.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
@@ -132,6 +134,8 @@ export type BridgeOptions = {
   commandsPath?: string
   // The installed companion mod's manifest, for its version.
   modManifest?: string
+  // Codex's settings folder (~/.codex), where its hooks.json lives.
+  codexHome?: string
   // Names and archive flags; defaults to sessions.json beside the uploads folder.
   metaPath?: string
   // Who is on the tailnet (tests hand in a made-up one).
@@ -297,6 +301,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
   store.seedCommands(readCommands(commandsPath))
 
+  const codexHome = options.codexHome ?? join(homedir(), '.codex')
   const modManifest = options.modManifest ?? join(homedir(), '.claude', 'local-mods', 'choibuddy', '.claude-plugin', 'plugin.json')
   let modReadAt = 0
 
@@ -960,6 +965,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
         return {
           sessionId: session.id,
+          agent: session.agent,
           project: session.name,
           cwd: session.cwd,
           title: meta.name(session.id) ?? (path === null ? '' : transcripts.reader(path).bestTitle),
@@ -1197,6 +1203,32 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     if (req.method === 'GET' && url.pathname === '/api/tailnet/bridges') {
       sendJson(res, 200, { bridges: await discover() })
+
+      return
+    }
+
+    // Codex on this PC: whether it is there and ChoiBuddy's hooks are listed.
+    if (req.method === 'GET' && url.pathname === '/api/codex') {
+      sendJson(res, 200, codexState(codexHome))
+
+      return
+    }
+
+    // Lists ChoiBuddy's hooks in Codex's hooks.json, or takes them out. Only
+    // this PC's own app may change another program's settings.
+    if (req.method === 'POST' && url.pathname === '/api/codex') {
+      if (caller.device !== null) {
+        sendJson(res, 403, { ok: false, error: 'owner only' })
+
+        return
+      }
+
+      const body = await readBody(req, API_BODY_LIMIT)
+      const on = bool(body === null ? null : parseJsonObject(body), 'on') ?? false
+      const state = setCodexHooks(codexHome, on ? codexCommand(process.execPath, join(dirname(fileURLToPath(import.meta.url)), 'ensure.ts')) : null)
+
+      log(`codex hooks ${on ? 'on' : 'off'}`)
+      sendJson(res, 200, { ok: true, ...state })
 
       return
     }

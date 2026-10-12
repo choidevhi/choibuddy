@@ -1,3 +1,4 @@
+import { patchFiles, patchLines } from './codex.ts'
 import type { CodeLine, CodePreview, Preview, StepKind, TodoItem, TodoStatus } from '../../shared/protocol.ts'
 import { arr, type Json, type JsonObject, num, objects, str, strings } from './json.ts'
 
@@ -71,6 +72,8 @@ export function kindOf(tool: string): StepKind {
     case 'Edit':
     case 'MultiEdit':
     case 'NotebookEdit':
+    // Codex's file edits.
+    case 'apply_patch':
       return 'edit'
     case 'Write':
       return 'write'
@@ -153,7 +156,10 @@ export function stepTitle(tool: string, input: JsonObject): string {
     case 'read':
     case 'edit':
     case 'write': {
-      const path = filePathOf(input)
+      const files = tool === 'apply_patch' ? patchFiles(str(input, 'command') ?? '') : []
+      const path = files[0] ?? filePathOf(input)
+
+      if (files.length > 1) return `${baseName(path)} +${files.length - 1}`
 
       return path === '' ? tool : baseName(path)
     }
@@ -300,6 +306,12 @@ export function toolPreview(tool: string, input: JsonObject, read: FileReader): 
     case 'read':
       return readPreview(input, read)
     case 'edit': {
+      if (tool === 'apply_patch') {
+        const patch = str(input, 'command') ?? ''
+
+        return code(patchFiles(patch)[0] ?? '', patchLines(patch).slice(0, MAX_LINES).map(line => ({ n: null, text: clip(line.text, MAX_LINE_CHARS), mark: line.mark })))
+      }
+
       const path = filePathOf(input)
       const edits = objects(arr(input, 'edits'))
 

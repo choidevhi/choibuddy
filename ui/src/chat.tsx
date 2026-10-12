@@ -374,7 +374,9 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
           className="field composer-input"
           rows={1}
           disabled={!ready}
-          placeholder={dragging ? t('chat.dropHint') : ready ? t('chat.placeholder') : session === null || session.status === 'ended' ? t('chat.pastSession') : t('chat.noMod')}
+          placeholder={
+            dragging ? t('chat.dropHint') : ready ? t('chat.placeholder') : session === null || session.status === 'ended' ? t('chat.pastSession') : session.agent === 'codex' ? t('chat.codexNoPrompt') : t('chat.noMod')
+          }
           title={ready ? undefined : t('chat.noMod')}
           value={draft}
           onChange={event => {
