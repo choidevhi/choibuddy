@@ -1757,7 +1757,8 @@ button.step:hover {
      match, so measuring against the window would shrink it step by step. */
   width: max-content;
   max-width: 340px;
-  padding: 10px 10px 6px;
+  /* Room for the bubbles' shadow: the window ends where this padding does. */
+  padding: 12px 12px 6px;
 }
 
 .fb-stack {
@@ -1777,7 +1778,7 @@ button.step:hover {
   border-radius: 14px;
   background: var(--card);
   border: 1px solid var(--card-line);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
   color: var(--text);
   text-align: left;
   animation: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.1);
@@ -4054,4 +4055,37 @@ body.resizing--column {
   .update-badge-text {
     display: none;
   }
+}
+
+/* Folding the ended sessions */
+
+.convo-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.convo-fold-caret {
+  width: 10px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.convo-list-head .convo-list-tool {
+  margin-left: auto;
+}
+
+.convo-list-head .convo-list-pc {
+  flex: 1;
+}
+
+/* The browser as a pane beside a session */
+
+.browser-pane > .browser {
+  flex: 1;
+  height: auto;
+  padding: 0;
 }

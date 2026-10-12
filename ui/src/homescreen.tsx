@@ -5,10 +5,12 @@ import type { CommandsFn, UploadFn } from './chat.tsx'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { Home } from './home.tsx'
 import { useI18n } from './i18n.ts'
-import { SplitDownIcon, SplitIcon, XIcon } from './icons.tsx'
+import { BrowserPane } from './browser.tsx'
+import { GlobeIcon, SplitDownIcon, SplitIcon, XIcon } from './icons.tsx'
 import { ConnectionContext, type LinkState } from './live.ts'
+import { platform } from './platform.ts'
 import { type PcEntry, useSessionNav } from './sessions.tsx'
-import { closeLeaf, leavesOf, MAX_TILES, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
+import { closeLeaf, leavesOf, MAX_TILES, openBrowserBeside, sessionLeavesOf, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 
 // Panes need room: below this width only the pane in focus is drawn.
 const SPLIT_MIN_PX = 900
@@ -42,10 +44,13 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
   const [focusId, setFocusId] = useState('')
   const wide = useWide(SPLIT_MIN_PX)
   const leaves = leavesOf(tile)
-  const focused = leaves.find(leaf => leaf.id === focusId) ?? leaves[0]
+  // The panes with sessions; the browser pane never takes the focus.
+  const panes = sessionLeavesOf(tile)
+  const focused = panes.find(leaf => leaf.id === focusId) ?? panes[0]
   const sessionOf = (leaf: TileLeaf): PcSession | null => (leaf.sessionId === null ? auto : (sessions.find(session => session.id === leaf.sessionId) ?? null))
   const focusedSession = focused === undefined ? null : sessionOf(focused)
-  const shownIds = new Set(leaves.flatMap(leaf => (leaf.sessionId === null ? [] : [leaf.sessionId])))
+  const shownIds = new Set(panes.flatMap(leaf => (leaf.sessionId === null ? [] : [leaf.sessionId])))
+  const canBrowser = platform === 'windows' && (leaves.length > panes.length || leaves.length < MAX_TILES)
 
   const show = (leafId: string, sessionId: string | null): void => setTile(current => setLeafSession(current, leafId, sessionId))
 
@@ -76,7 +81,7 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
     const rest = closeLeaf(tile, leafId)
 
     setTile(() => rest)
-    setFocusId(leavesOf(rest)[0]?.id ?? '')
+    if (leafId === focused?.id) setFocusId(sessionLeavesOf(rest)[0]?.id ?? '')
   }
 
   const several = wide && leaves.length > 1
@@ -99,6 +104,20 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
               const session = sessionOf(leaf)
               const feed = feedFor(feeds, session?.pcKey)
 
+              if (leaf.view === 'browser') {
+                return (
+                  <BrowserPane
+                    key={leaf.id}
+                    session={session}
+                    title={session?.name ?? t('chat.paneEmpty')}
+                    onClose={() => close(leaf.id)}
+                    onSend={onSend}
+                    onUpload={onUpload}
+                    loadCommands={loadCommands}
+                  />
+                )
+              }
+
               return (
                 <section
                   key={leaf.id}
@@ -112,6 +131,17 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
                           {t('home.follow')}
                         </button>
                       )}
+                      {canBrowser && (
+                        <button
+                          type="button"
+                          className="tile-tool"
+                          onClick={() => setTile(current => openBrowserBeside(current, leaf.id, leaf.sessionId))}
+                          aria-label={t('browser.openBeside')}
+                          title={t('browser.openBeside')}
+                        >
+                          <GlobeIcon size={14} />
+                        </button>
+                      )}
                       {leaves.length < MAX_TILES && (
                         <>
                           <button type="button" className="tile-tool" onClick={() => split(leaf.id, 'row')} aria-label={t('chat.split')} title={t('chat.split')}>
@@ -122,7 +152,7 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
                           </button>
                         </>
                       )}
-                      {leaves.length > 1 && (
+                      {panes.length > 1 && (
                         <button type="button" className="tile-tool" onClick={() => close(leaf.id)} aria-label={t('chat.closePane')} title={t('chat.closePane')}>
                           <XIcon size={14} />
                         </button>

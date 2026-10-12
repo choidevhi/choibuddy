@@ -15,6 +15,9 @@ unsafe extern "system" {
 
 const SWP_NOZORDER: u32 = 0x0004;
 const SWP_NOACTIVATE: u32 = 0x0010;
+// Don't copy the old picture into the resized window: it would show the buddy
+// shifted for a frame until the page draws again.
+const SWP_NOCOPYBITS: u32 = 0x0100;
 const MARGIN: f64 = 10.0;
 const SAVE_EVERY: Duration = Duration::from_millis(400);
 
@@ -130,7 +133,7 @@ pub fn layout(window: &WebviewWindow, state: &FloatState, width: f64, height: f6
     *state.laid.lock().map_err(|error| error.to_string())? = Some(at);
 
     // SAFETY: a valid top-level window handle from Tauri; flags keep z-order and focus as they are.
-    let moved = unsafe { SetWindowPos(hwnd.0 as isize, 0, at.x, at.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE) };
+    let moved = unsafe { SetWindowPos(hwnd.0 as isize, 0, at.x, at.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS) };
 
     if moved == 0 {
         return Err("SetWindowPos failed".to_owned());

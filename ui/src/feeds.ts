@@ -188,13 +188,14 @@ export function useFeeds(sources: Source[], onAlert: (alert: Alert, source: Sour
 
           if (alert !== null) alertRef.current(alert, source)
         })
-        // Only this PC's bridge can ask about this PC's browser.
+        // Any PC's bridge may ask: the browser open here can show Claude a
+        // page for a session on another PC.
         stream.addEventListener('browser-request', event => {
           lastSeen = Date.now()
 
           const request = parseBrowserRequest(event.data)
 
-          if (request !== null && source.local) browserRef.current?.(request, source)
+          if (request !== null) browserRef.current?.(request, source)
         })
         stream.addEventListener('error', () => {
           if (stream?.readyState !== EventSource.CLOSED) {

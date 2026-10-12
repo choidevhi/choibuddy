@@ -213,3 +213,89 @@ test('trusting the tailnet is the owner choice, and turning it off cuts the devi
     )
   })
 })
+
+test('a session whose command list was lost borrows the newest one, and the list survives a restart', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-commands-'))
+  const commandsPath = join(root, 'commands.json')
+  const start = (): ReturnType<typeof startBridge> =>
+    startBridge({
+      config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false },
+      saveConfig: () => {},
+      galleryDir: join(root, 'gallery'),
+      uploadsDir: join(root, 'uploads'),
+      docBackupDir: join(root, 'backups'),
+      claudeDir: join(root, 'claude'),
+      log: () => {},
+      bindTailnet: false,
+      read: () => null,
+      commandsPath,
+    })
+  const first = await start()
+  const one = `http://127.0.0.1:${first.port}`
+
+  await hook(one, { hook_event_name: 'SessionStart', session_id: 's1', source: 'startup' })
+  await api(one, '/mod/poll', { sessionId: 's1' }, {})
+  await api(one, '/mod/commands', { sessionId: 's1', commands: [{ name: 'compact', description: 'Compact', source: 'builtin' }] }, {})
+  await first.close()
+
+  // After a restart, a session whose (older) mod never sends its list again.
+  const second = await start()
+  const two = `http://127.0.0.1:${second.port}`
+
+  try {
+    await hook(two, { hook_event_name: 'SessionStart', session_id: 's2', source: 'startup' })
+    await api(two, '/mod/poll', { sessionId: 's2' }, {})
+
+    const listed = (await api(two, '/api/commands?session=s2')).json
+    const session = objects(arr((await api(two, '/api/snapshot')).json, 'sessions'))[0]
+
+    assert.deepEqual(objects(arr(listed, 'commands')).map(item => str(item, 'name')), ['compact'])
+    assert.equal(bool(session ?? {}, 'canCommand'), true)
+
+    // "/compact" goes to the mod as a command, not as a prompt.
+    await api(two, '/api/prompt', { sessionId: 's2', text: '/compact' })
+
+    const polled = (await api(two, '/mod/poll', { sessionId: 's2' }, {})).json
+
+    assert.deepEqual(objects(arr(polled, 'commands')).map(item => str(item, 'command')), ['compact'])
+  } finally {
+    await second.close()
+  }
+})
+
+test('another device of the person can answer browser_view, and a terminal needs a real folder', async () => {
+  await withBridge({}, async ({ url }) => {
+    const device = parseJsonObject(await (await fetch(`${url}/api/devices`, { method: 'POST', headers: authorized })).text())
+    const code = str(device, 'token') ?? ''
+    const other = { Authorization: `Bearer ${code}`, 'Content-Type': 'application/json' }
+    const events = await fetch(`${url}/api/events?token=${code}`)
+    const reader = events.body?.getReader()
+    const asked = fetch(`${url}/mod/browser-view`, { method: 'POST', body: JSON.stringify({ sessionId: 's1' }) }).then(res => res.text())
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let requestId = ''
+
+    while (requestId === '' && reader !== undefined) {
+      const { value, done } = await reader.read()
+
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      const match = /event: browser-request\ndata: (.*)\n/.exec(buffer)
+
+      if (match?.[1] !== undefined) requestId = str(parseJsonObject(match[1]), 'id') ?? ''
+    }
+
+    await reader?.cancel()
+
+    const answered = await api(url, '/api/browser/answer', { id: requestId, ok: true, url: 'https://example.com/', title: 'Example', picked: null, image: null }, other)
+
+    assert.equal(answered.status, 200)
+    assert.match(await asked, /example\.com/)
+
+    const terminal = await api(url, '/api/terminal/open', { cwd: join(tmpdir(), 'no-such-folder-choibuddy') }, other)
+
+    assert.equal(terminal.status, 400)
+    assert.equal(str(terminal.json, 'error'), 'no such folder')
+  })
+})

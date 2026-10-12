@@ -343,6 +343,11 @@ export async function endSession(connection: Connection, sessionId: string): Pro
   return res?.status === 409 ? 'no-mod' : 'failed'
 }
 
+// A terminal window on the PC, in `cwd` (empty: the home folder).
+export async function openTerminal(connection: Connection, cwd: string): Promise<boolean> {
+  return (await post(connection, '/api/terminal/open', { cwd }))?.ok === true
+}
+
 export async function setTrustTailnet(connection: Connection, on: boolean): Promise<boolean> {
   return (await post(connection, '/api/tailnet/trust', { on }))?.ok === true
 }

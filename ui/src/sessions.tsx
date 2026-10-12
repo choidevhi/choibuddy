@@ -6,10 +6,11 @@ import { Buddy, type Mood, type Pose, tintFor, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { ago, useI18n } from './i18n.ts'
-import { PlusIcon } from './icons.tsx'
-import { archiveSessions, deleteConversation, endSession, fetchHistory, renameSession } from './live.ts'
+import { PlusIcon, TerminalIcon } from './icons.tsx'
+import { archiveSessions, deleteConversation, endSession, fetchHistory, openTerminal, renameSession } from './live.ts'
 import { ContextMenu, type MenuEntry } from './menu.tsx'
 import { Picker } from './picker.tsx'
+import { ON_OFF, usePref } from './prefs.ts'
 
 // A session from any PC, with the PC it lives on.
 export type PcEntry = HistoryEntry & { pcKey: string; pcName: string }
@@ -251,6 +252,8 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
   const { entries, setEntries, reload } = useHistory(feeds, sessions)
   const [pcKey, setPcKey] = useState<string | null>(null)
   const [showArchive, setShowArchive] = useState(false)
+  // The ended sessions can be folded away, and stay so.
+  const [foldEnded, setFoldEnded] = usePref('foldEnded', ON_OFF, 'off')
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renaming, setRenaming] = useState<PcEntry | null>(null)
   const [asking, setAsking] = useState<Asking | null>(null)
@@ -330,19 +333,28 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
     if (failed > 0) showToast(t('chat.actionFailed'))
   }
 
+  // A terminal on the session's PC, in its folder (or the PC's home folder).
+  const terminal = async (pcKey: string, cwd: string): Promise<void> => {
+    const connection = feedFor(feeds, pcKey)?.connection ?? null
+
+    showToast(connection !== null && (await openTerminal(connection, cwd)) ? t('terminal.opened') : t('chat.actionFailed'))
+  }
+
   const menuItems = (entry: PcEntry): Array<MenuEntry | null> => {
     const renameItem: MenuEntry = { label: t('menu.rename'), onSelect: () => setRenaming(entry) }
+    const terminalItem: MenuEntry = { label: t('menu.terminal'), onSelect: () => void terminal(entry.pcKey, entry.cwd) }
 
     if (entry.live) {
       const canEnd = sessions.find(session => session.id === entry.sessionId)?.canPrompt === true
 
-      return [renameItem, null, { label: t('menu.end'), danger: true, disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => setAsking({ kind: 'end', entry }) }]
+      return [renameItem, terminalItem, null, { label: t('menu.end'), danger: true, disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => setAsking({ kind: 'end', entry }) }]
     }
 
     const ended = groupsOf(entries, entry.pcKey).ended
 
     return [
       renameItem,
+      terminalItem,
       { label: entry.archived ? t('menu.unarchive') : t('menu.archive'), onSelect: () => void archive([entry], !entry.archived) },
       { label: t('menu.delete'), danger: true, onSelect: () => setAsking({ kind: 'delete', entries: [entry] }) },
       null,
@@ -380,6 +392,11 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
     <aside className="convo-list">
       <div className="section-label convo-list-head">
         <span className="convo-list-pc">{shownFeed === null ? t('chat.sessions') : pcName(shownFeed)}</span>
+        {shownPc !== null && (
+          <button type="button" className="icon-btn convo-list-tool" onClick={() => void terminal(shownPc, '')} title={t('terminal.open')} aria-label={t('terminal.open')}>
+            <TerminalIcon size={15} />
+          </button>
+        )}
         <button type="button" className="btn small" onClick={onNewSession} title={t('newSession.title')}>
           <PlusIcon size={13} /> {t('chat.newSession')}
         </button>
@@ -388,9 +405,10 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
       {groups.live.length === 0 && <div className="convo-none">{t('chat.noOpen')}</div>}
       {groups.ended.length > 0 && (
         <div className="convo-divider">
-          <span className="convo-divider-label">
+          <button type="button" className="convo-divider-label convo-fold" onClick={() => setFoldEnded(foldEnded === 'on' ? 'off' : 'on')} aria-expanded={foldEnded !== 'on'}>
+            <span className="convo-fold-caret">{foldEnded === 'on' ? '▸' : '▾'}</span>
             {t('chat.groupEnded')} · {groups.ended.length}
-          </span>
+          </button>
           <button type="button" className="link-btn" onClick={() => void archive(groups.ended, true)}>
             {t('chat.archiveAll')}
           </button>
@@ -399,7 +417,7 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
           </button>
         </div>
       )}
-      {groups.ended.map(row)}
+      {foldEnded !== 'on' && groups.ended.map(row)}
       {groups.archived.length > 0 && (
         <button type="button" className="convo-divider convo-archive-toggle" onClick={() => setShowArchive(!showArchive)} aria-expanded={showArchive}>
           <span className="convo-divider-label">

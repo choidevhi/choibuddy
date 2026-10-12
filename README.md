@@ -28,14 +28,15 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 - **PC by PC, everywhere.** Home, chat and images all start the same way. Your PCs sit on the left as buddies of their own colour (hover for the name). Next come the chosen PC's sessions: open ones, ended ones under a divider, and the archive. The view comes last.
 - **Panes like tmux.** On a PC, split home or chat into up to 6 panes, left/right or top/bottom, and split a half again. Drag the lines to resize; the layout is remembered. A home pane follows whichever session is busy until you pick one for it.
 - **Chat.** Whole conversations come from the session transcripts, with the pictures Claude opened and the ones you sent shown where they happened, live. Send prompts and attach files (from the home screen too). Each session keeps its own unsent draft and attachments, so you can switch sessions and come back to it.
-- **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), archive it or delete it. Ended sessions can be archived or deleted all at once.
+- **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), open a terminal in its folder, archive it or delete it. Ended sessions can be folded away, or archived or deleted all at once.
+- **Terminal.** The terminal button above the session list opens a terminal on that PC (WezTerm, Windows Terminal or cmd), even when you press it on the phone.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
 - **New sessions.** Pick a PC, a folder and a first prompt, and Claude Code opens in a new terminal on that PC.
 
 ![Point at it. Claude sees it too](promo/en/03-browser.png)
 
-- **Built-in browser (Windows).** Pick an element on a page and drop it into your prompt. Claude looks at the same page with the `browser_view` tool.
+- **Built-in browser (Windows).** Pick an element on a page and drop it into your prompt. Claude looks at the same page with the `browser_view` tool. Open it in its own tab or as a pane right of the session you are working on (the globe button on a pane). A session on another PC works too: when Claude there calls `browser_view`, the ChoiBuddy app with its browser open answers, whichever PC it runs on.
 
 ![Every image Claude saw, by project](promo/en/05-gallery.png)
 
@@ -47,7 +48,7 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 
 ![Edit CLAUDE.md and AGENTS.md in place](promo/en/06-docs.png)
 
-- **Docs.** View, edit and create `CLAUDE.md`, `AGENTS.md` and subagent definitions per PC and per project, with conflict checks and backups.
+- **Docs.** View, edit and create `CLAUDE.md`, `AGENTS.md` and subagent definitions, PC by PC (buddies on the left) and project by project, with conflict checks and backups.
 
 ![Right there on your phone](promo/en/07-phone.png)
 
@@ -109,8 +110,8 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 - **Auto Accept.** It lives in memory only, so it turns off when the bridge restarts. It allows ordinary permission requests only; questions and plans always need a person.
 - **Connecting Tailscale devices automatically.** Off unless you turn it on for this PC. A device then gets a code of its own only over Tailscale, and only when Tailscale says it is signed in to the same account as this PC. Devices shared with you and tagged devices are left out. Each one shows in the device list and can be cut off, and turning the option off cuts all of them. Anyone who can sign in to your Tailscale account could connect, so keep that account safe.
 - **Ending a session** sends `/exit` through the companion mod, the same as typing it in the terminal. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
-- **New sessions.** A terminal opens only when the folder exists, and it starts without going through a shell (the program and its arguments are passed separately).
-- **Built-in browser.** Pages get no access to the app's IPC; a page can only send the app the element you picked and its address. Only the app on this PC can answer Claude's `browser_view` calls.
+- **New sessions and terminals.** A terminal opens only when the folder exists, and it starts without going through a shell (the program and its arguments are passed separately). A device with a code can open a terminal window on the PC, but cannot type into it.
+- **Built-in browser.** Pages get no access to the app's IPC; a page can only send the app the element you picked and its address. Claude's `browser_view` calls are answered by a connected ChoiBuddy app with its browser open (this PC's, or another PC's that has this one connected); the first answer counts. A device that may send prompts may show Claude a page too. An app whose browser is closed waits 3 seconds before saying so, so an open one answers first.
 
 ## Good to know
 

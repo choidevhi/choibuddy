@@ -84,7 +84,10 @@ test('a terminal is picked in order: WezTerm, Windows Terminal, cmd', () => {
   const env = { ProgramFiles: 'C:\\PF', LOCALAPPDATA: 'C:\\LA', ComSpec: 'C:\\Windows\\cmd.exe' }
 
   assert.equal(pickTerminal(env, () => true).name, 'WezTerm')
-  assert.deepEqual(pickTerminal(env, () => true).args('C:\\work'), ['start', '--cwd', 'C:\\work', '--', 'claude'])
+  assert.deepEqual(pickTerminal(env, () => true).args('C:\\work', ['claude']), ['start', '--cwd', 'C:\\work', '--', 'claude'])
+  // A plain terminal: the shell only.
+  assert.deepEqual(pickTerminal(env, () => true).args('C:\\work', []), ['start', '--cwd', 'C:\\work'])
+  assert.deepEqual(pickTerminal(env, path => path.endsWith('wt.exe')).args('C:\\work', []), ['-d', 'C:\\work'])
   assert.equal(pickTerminal(env, path => path.endsWith('wt.exe')).name, 'Windows Terminal')
   assert.equal(pickTerminal(env, () => false).name, 'cmd')
 })

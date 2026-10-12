@@ -1,11 +1,13 @@
 import { type KeyboardEvent, useEffect, useState } from 'react'
 import type { DocFile, DocGroup } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
-import { type Feed, feedFor } from './feeds.ts'
+import type { Tone } from './buddy.tsx'
+import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { useI18n } from './i18n.ts'
 import { fetchDocs, readDoc, writeDoc } from './live.ts'
 import { Markdown } from './markdown.tsx'
 import { Picker } from './picker.tsx'
+import { PcChips, pcName, PcRail } from './sessions.tsx'
 
 type PcGroup = DocGroup & { pcKey: string; pcName: string }
 
@@ -27,12 +29,13 @@ function sizeText(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
 }
 
-// CLAUDE.md, AGENTS.md and agent definitions on every PC: pick one on the
-// left, edit or preview it on the right. Unsaved edits stay per file while
-// moving between them.
-export function Docs({ feeds, multiPc }: { feeds: Feed[]; multiPc: boolean }) {
+// CLAUDE.md, AGENTS.md and agent definitions, PC by PC: the PCs as buddies,
+// the chosen PC's files by project, then the file to edit or preview.
+// Unsaved edits stay per file while moving between them.
+export function Docs({ feeds, sessions, tone }: { feeds: Feed[]; sessions: PcSession[]; tone: Tone }) {
   const { lang, t } = useI18n()
   const [groups, setGroups] = useState<PcGroup[]>([])
+  const [pcKey, setPcKey] = useState<string | null>(null)
   const [opened, setOpened] = useState<Opened | null>(null)
   const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(new Map())
   const [mode, setMode] = useState<'edit' | 'preview'>('edit')
@@ -54,10 +57,14 @@ export function Docs({ feeds, multiPc }: { feeds: Feed[]; multiPc: boolean }) {
   const dirty = opened !== null && draft !== opened.saved
 
   // Back closes the file; unsaved edits stay in drafts for when it opens again.
-  useBackLayer(opened !== null, () => {
-    setOpened(null)
-    setStatus(null)
-  })
+  useBackLayer(
+    opened !== null,
+    () => {
+      setOpened(null)
+      setStatus(null)
+    },
+    false,
+  )
 
   const setDraft = (key: string, text: string): void => setDrafts(current => new Map(current).set(key, text))
 
@@ -124,20 +131,26 @@ export function Docs({ feeds, multiPc }: { feeds: Feed[]; multiPc: boolean }) {
     }
   }
 
-  const groupTitle = (group: PcGroup): string => {
-    const title = group.key === 'user' ? t('docs.user') : group.title
+  const groupTitle = (group: PcGroup): string => (group.key === 'user' ? t('docs.user') : group.title)
 
-    return multiPc && group.pcName !== '' ? `${title} · ${group.pcName}` : title
-  }
+  // The PC of the open file, until another is picked.
+  const shownPc = pcKey !== null && feeds.some(feed => feed.key === pcKey) ? pcKey : (opened?.pcKey ?? groups[0]?.pcKey ?? feeds[0]?.key ?? null)
+  const shownFeed = feeds.find(feed => feed.key === shownPc) ?? null
+  const pcGroups = groups.filter(group => group.pcKey === shownPc)
 
   const fileMeta = (file: DocFile): string =>
     file.exists ? `${sizeText(file.size)} · ${new Date(file.mtime).toLocaleDateString(lang)}` : t('docs.create')
 
   return (
-    <div className="convo docs">
+    <div className="convo convo--chat docs">
+      <PcRail feeds={feeds} sessions={sessions} shown={shownPc} tone={tone} onPick={setPcKey} />
+
       <aside className="convo-list">
+        <div className="section-label convo-list-head">
+          <span className="convo-list-pc">{shownFeed === null ? t('tab.docs') : pcName(shownFeed)}</span>
+        </div>
         <div className="docs-hint">{t('docs.hint')}</div>
-        {groups.map(group => (
+        {pcGroups.map(group => (
           <div className="docs-group" key={`${group.pcKey}-${group.key}`}>
             <div className="section-label docs-group-title" title={group.cwd ?? undefined}>
               {groupTitle(group)}
@@ -168,12 +181,13 @@ export function Docs({ feeds, multiPc }: { feeds: Feed[]; multiPc: boolean }) {
 
       <section className="convo-main">
         <div className="convo-select-row">
+          <PcChips feeds={feeds} sessions={sessions} shown={shownPc} tone={tone} onPick={setPcKey} />
           <Picker
             className="convo-select"
             value={opened?.key ?? null}
-            title={t('tab.docs')}
+            title={shownFeed === null ? t('tab.docs') : pcName(shownFeed)}
             placeholder={t('docs.pick')}
-            options={groups.flatMap(group =>
+            options={pcGroups.flatMap(group =>
               group.files.map(file => ({ value: keyOf(group.pcKey, file.id), label: file.label, hint: fileMeta(file), group: groupTitle(group) })),
             )}
             onChange={key => {

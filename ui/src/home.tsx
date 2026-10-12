@@ -150,10 +150,14 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
   const latestId = session?.steps.at(-1)?.id ?? null
 
   // A picked step or agent is a look back; back returns to the live view.
-  useBackLayer(selectedId !== null || agentId !== null, () => {
-    setSelectedId(null)
-    setAgentId(null)
-  })
+  useBackLayer(
+    selectedId !== null || agentId !== null,
+    () => {
+      setSelectedId(null)
+      setAgentId(null)
+    },
+    false,
+  )
 
   // A new step takes the stage again, even after the person picked an older one.
   useEffect(() => setSelectedId(null), [latestId, session?.id])

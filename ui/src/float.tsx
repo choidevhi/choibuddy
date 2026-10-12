@@ -313,7 +313,6 @@ export function FloatApp() {
   const current = useShownSession(sessions, null, now)
   const look = lookFor(current, sources.length === 0 ? 'connecting' : overallLink(feeds), now)
   const pending = merged.pending
-  const working = current !== null && (current.status === 'working' || current.status === 'thinking')
   const agents = (current?.agents ?? []).filter(agent => agent.status === 'running').slice(0, MAX_AGENTS)
   const liveEvents = events.filter(item => item.until > now)
   const firstPending = pending[0]
@@ -361,7 +360,7 @@ export function FloatApp() {
               {item.text !== '' && <span className="fb-text">{item.text}</span>}
             </button>
           ))}
-          {progressBubbles === 'on' && working && firstPending === undefined && current !== null && <ProgressBubble session={current} now={now} t={t} />}
+          {progressBubbles === 'on' && current?.status === 'working' && firstPending === undefined && <ProgressBubble session={current} now={now} t={t} />}
           {firstPending !== undefined && pendingFeed !== null && (
             <PendingBubble pending={firstPending} more={pending.length - 1} connection={pendingFeed.connection} t={t} />
           )}

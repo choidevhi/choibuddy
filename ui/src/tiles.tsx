@@ -2,8 +2,11 @@ import { type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useS
 
 // Panes laid out like tmux: a pane splits into two side by side ("row") or
 // one over the other ("column"), and each half can split again. A pane
-// shows one session, or follows whichever session is busy (null).
-export type TileLeaf = { kind: 'leaf'; id: string; sessionId: string | null }
+// shows one session, or follows whichever session is busy (null). One pane
+// can hold the browser instead (Windows), working for its session.
+export type PaneKind = 'session' | 'browser'
+
+export type TileLeaf = { kind: 'leaf'; id: string; sessionId: string | null; view: PaneKind }
 
 export type TileSplit = { kind: 'split'; id: string; dir: 'row' | 'column'; ratio: number; a: Tile; b: Tile }
 
@@ -14,23 +17,28 @@ export const MAX_TILES = 6
 const MIN_RATIO = 0.15
 
 // The stored form, checked node by node when read back.
-type StoredTile = { kind?: string; id?: string; sessionId?: string | null; dir?: string; ratio?: number; a?: StoredTile; b?: StoredTile } | null
+type StoredTile = { kind?: string; id?: string; sessionId?: string | null; view?: string; dir?: string; ratio?: number; a?: StoredTile; b?: StoredTile } | null
 
 function newId(): string {
   return crypto.randomUUID().slice(0, 8)
 }
 
 export function single(sessionId: string | null): Tile {
-  return { kind: 'leaf', id: newId(), sessionId }
+  return { kind: 'leaf', id: newId(), sessionId, view: 'session' }
 }
 
 export function leavesOf(tile: Tile): TileLeaf[] {
   return tile.kind === 'leaf' ? [tile] : [...leavesOf(tile.a), ...leavesOf(tile.b)]
 }
 
+// The panes that show sessions, not the browser.
+export function sessionLeavesOf(tile: Tile): TileLeaf[] {
+  return leavesOf(tile).filter(leaf => leaf.view === 'session')
+}
+
 // Splits a pane in two; the new pane (right of it or under it) shows `sessionId`.
-export function splitLeaf(tile: Tile, leafId: string, dir: 'row' | 'column', sessionId: string | null): { tree: Tile; id: string } {
-  const added: TileLeaf = { kind: 'leaf', id: newId(), sessionId }
+export function splitLeaf(tile: Tile, leafId: string, dir: 'row' | 'column', sessionId: string | null, view: PaneKind = 'session'): { tree: Tile; id: string } {
+  const added: TileLeaf = { kind: 'leaf', id: newId(), sessionId, view }
 
   const walk = (node: Tile): Tile => {
     if (node.kind === 'leaf') return node.id === leafId ? { kind: 'split', id: newId(), dir, ratio: 0.5, a: node, b: added } : node
@@ -50,6 +58,15 @@ export function closeLeaf(tile: Tile, leafId: string): Tile {
   return { ...tile, a: closeLeaf(tile.a, leafId), b: closeLeaf(tile.b, leafId) }
 }
 
+// The browser beside a pane, for that pane's session. There is one browser,
+// so an open one moves here.
+export function openBrowserBeside(tile: Tile, leafId: string, sessionId: string | null): Tile {
+  const open = leavesOf(tile).find(leaf => leaf.view === 'browser')
+  const rest = open === undefined ? tile : closeLeaf(tile, open.id)
+
+  return splitLeaf(rest, leafId, 'row', sessionId, 'browser').tree
+}
+
 export function setLeafSession(tile: Tile, leafId: string, sessionId: string | null): Tile {
   if (tile.kind === 'leaf') return tile.id === leafId ? { ...tile, sessionId } : tile
 
@@ -65,7 +82,7 @@ function setRatio(tile: Tile, splitId: string, ratio: number): Tile {
 
 export function parseTile(stored: StoredTile): Tile | null {
   if (stored === null || typeof stored.id !== 'string') return null
-  if (stored.kind === 'leaf') return { kind: 'leaf', id: stored.id, sessionId: typeof stored.sessionId === 'string' ? stored.sessionId : null }
+  if (stored.kind === 'leaf') return { kind: 'leaf', id: stored.id, sessionId: typeof stored.sessionId === 'string' ? stored.sessionId : null, view: stored.view === 'browser' ? 'browser' : 'session' }
   if (stored.kind !== 'split' || (stored.dir !== 'row' && stored.dir !== 'column')) return null
 
   const a = parseTile(stored.a ?? null)
@@ -78,8 +95,10 @@ export function parseTile(stored: StoredTile): Tile | null {
 function readTiles(key: string): Tile {
   try {
     const stored: StoredTile = JSON.parse(localStorage.getItem(`choibuddy.${key}`) ?? 'null')
+    const tile = parseTile(stored)
 
-    return parseTile(stored) ?? single(null)
+    // A layout always keeps a session pane.
+    return tile !== null && sessionLeavesOf(tile).length > 0 ? tile : single(null)
   } catch {
     return single(null)
   }

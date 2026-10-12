@@ -131,6 +131,10 @@ export class Store {
   readonly #outgoing = new Map<string, Outgoing[]>()
   readonly #commandsOut = new Map<string, OutgoingCommand[]>()
   readonly #commands = new Map<string, CommandInfo[]>()
+  // The newest list any session reported. Built-in commands are the same in
+  // every session, so one whose own list is unknown (the bridge restarted,
+  // an older mod) borrows this one.
+  #latestCommands: CommandInfo[] | null = null
   readonly #agentModels = new Map<string, string>()
   readonly #deps: StoreDeps
 
@@ -671,10 +675,16 @@ export class Store {
 
   setCommands(sessionId: string, commands: CommandInfo[]): void {
     this.#commands.set(sessionId, commands)
+    if (commands.length > 0) this.#latestCommands = commands
+  }
+
+  // A list kept from before the bridge started.
+  seedCommands(commands: CommandInfo[]): void {
+    if (commands.length > 0) this.#latestCommands = commands
   }
 
   commandsFor(sessionId: string): CommandInfo[] {
-    return this.#commands.get(sessionId) ?? []
+    return this.#commands.get(sessionId) ?? this.#latestCommands ?? []
   }
 
   queueCommand(sessionId: string, command: string, args: string): QueueResult {
@@ -854,7 +864,7 @@ export class Store {
           ? this.#nameOf(session)
           : `${session.name} · ${session.id.slice(0, 4)}`,
       canPrompt: this.#modAlive(session.id, now),
-      canCommand: this.#modAlive(session.id, now) && this.#commands.has(session.id),
+      canCommand: this.#modAlive(session.id, now) && (this.#commands.has(session.id) || this.#latestCommands !== null),
       queued: [
         ...(this.#outgoing.get(session.id) ?? []).map(item => ({ text: item.text, mode: item.mode })),
         ...(this.#commandsOut.get(session.id) ?? []).map(item => ({ text: `/${item.command}${item.args === '' ? '' : ` ${item.args}`}`, mode: 'command' as const })),

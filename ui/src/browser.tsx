@@ -2,10 +2,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useEffect, useRef, useState } from 'react'
 import type { BrowserRequest, Session } from '../../shared/protocol.ts'
+import { useOverlayOpen } from './back.ts'
 import { type CommandsFn, Composer, type Injection, type UploadFn } from './chat.tsx'
 import { showToast } from './confirm.tsx'
 import { type Translate, useI18n } from './i18n.ts'
-import { ArrowLeftIcon, ArrowRightIcon, CameraIcon, CrosshairIcon, GlobeIcon, RotateIcon } from './icons.tsx'
+import { ArrowLeftIcon, ArrowRightIcon, CameraIcon, CrosshairIcon, GlobeIcon, RotateIcon, XIcon } from './icons.tsx'
 import { answerBrowser } from './live.ts'
 import type { Connection } from './platform.ts'
 
@@ -28,6 +29,10 @@ const state: { open: boolean; url: string; picked: Picked | null } = { open: fal
 
 const PICK_PADDING = 12
 
+// With this app's browser closed, another PC's ChoiBuddy may have one open
+// for the session: it gets this head start before this app says no.
+const CLOSED_ANSWER_DELAY_MS = 3000
+
 function pngFile(base64: string, name: string): File {
   return new File([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], name, { type: 'image/png' })
 }
@@ -48,6 +53,8 @@ export function pickedText(picked: Picked): string {
 
 // Answers Claude's browser_view: the address, a screenshot, the picked element.
 export async function answerBrowserRequest(connection: Connection, request: BrowserRequest, t: Translate): Promise<void> {
+  if (!state.open) await new Promise<void>(resolve => setTimeout(resolve, CLOSED_ANSWER_DELAY_MS))
+
   if (!state.open) {
     await answerBrowser(connection, request.id, { ok: false, error: 'The ChoiBuddy browser is not open. Ask the person to open the Browser tab in ChoiBuddy and load the page.' })
 
@@ -59,20 +66,20 @@ export async function answerBrowserRequest(connection: Connection, request: Brow
     invoke<{ url: string } | null>('browser_state').catch(() => null),
   ])
 
-  await answerBrowser(connection, request.id, {
+  const taken = await answerBrowser(connection, request.id, {
     ok: true,
     url: current?.url ?? state.url,
     title: state.picked?.title ?? '',
     picked: state.picked === null ? null : pickedText(state.picked),
     image,
   })
-  showToast(t('browser.claudeLooked'))
+
+  // Another app may have answered first.
+  if (taken) showToast(t('browser.claudeLooked'))
 }
 
 type Props = {
   session: Session | null
-  // A sheet or dialog is over the window: the page must not cover it.
-  covered: boolean
   onSend: (sessionId: string, text: string) => Promise<boolean>
   onUpload: UploadFn
   loadCommands: CommandsFn
@@ -81,8 +88,10 @@ type Props = {
 // A browser inside the widget (Windows). The page is a native webview laid
 // over `page`; the bar above drives it. Picking an element or attaching the
 // screen puts it into the prompt box below, for the session on the stage.
-export function BrowserTab({ session, covered, onSend, onUpload, loadCommands }: Props) {
+export function BrowserTab({ session, onSend, onUpload, loadCommands }: Props) {
   const { t } = useI18n()
+  // A sheet, menu or viewer is over the window: the page must not cover it.
+  const covered = useOverlayOpen()
   const [address, setAddress] = useState(state.url)
   const [url, setUrl] = useState(state.url)
   const [editing, setEditing] = useState(false)
@@ -286,5 +295,32 @@ export function BrowserTab({ session, covered, onSend, onUpload, loadCommands }:
 
       <Composer session={session} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} inject={inject} compact />
     </div>
+  )
+}
+
+type PaneProps = Props & {
+  // The session's name, shown in the head.
+  title: string
+  onClose: () => void
+}
+
+// The browser as a pane beside a session (Windows), working for that session.
+export function BrowserPane({ title, onClose, ...props }: PaneProps) {
+  const { t } = useI18n()
+
+  return (
+    <section className="convo-main pane browser-pane">
+      <header className="pane-head">
+        <GlobeIcon size={15} className="dim" />
+        <span className="pane-title">
+          <span className="pane-name">{t('tab.browser')}</span>
+          <span className="pane-meta">{title}</span>
+        </span>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label={t('chat.closePane')} title={t('chat.closePane')}>
+          <XIcon size={15} />
+        </button>
+      </header>
+      <BrowserTab {...props} />
+    </section>
   )
 }

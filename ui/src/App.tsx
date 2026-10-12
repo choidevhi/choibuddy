@@ -553,9 +553,9 @@ export function App() {
             ) : activeTab === 'gallery' ? (
               <Gallery feeds={feeds} sessions={ordered} latestAt={merged.galleryLatest} now={now} tone={tone} />
             ) : activeTab === 'browser' ? (
-              <BrowserTab session={current} covered={shown !== null || newSession} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} />
+              <BrowserTab session={current} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} />
             ) : activeTab === 'docs' ? (
-              <Docs feeds={feeds} multiPc={merged.multiPc} />
+              <Docs feeds={feeds} sessions={ordered} tone={tone} />
             ) : (
               <Connect feeds={feeds} now={now} localFeed={localFeed} prefs={prefs} onPrefs={onPrefs} onLang={setLang} onSourcesChanged={reload} update={update} onUpdate={() => setUpdating(true)} />
             )}

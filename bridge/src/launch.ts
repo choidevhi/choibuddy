@@ -9,7 +9,8 @@ import { join } from 'node:path'
 export type Terminal = {
   name: string
   program: string
-  args: (cwd: string) => string[]
+  // `command` runs in the new terminal; empty opens the terminal's own shell.
+  args: (cwd: string, command: string[]) => string[]
 }
 
 // Which terminal to use, best first: WezTerm, Windows Terminal, then plain cmd.
@@ -17,13 +18,13 @@ export function pickTerminal(env: NodeJS.ProcessEnv, exists: (path: string) => b
   const programFiles = env.ProgramFiles ?? 'C:\\Program Files'
   const wezterm = join(programFiles, 'WezTerm', 'wezterm.exe')
 
-  if (exists(wezterm)) return { name: 'WezTerm', program: wezterm, args: cwd => ['start', '--cwd', cwd, '--', 'claude'] }
+  if (exists(wezterm)) return { name: 'WezTerm', program: wezterm, args: (cwd, command) => ['start', '--cwd', cwd, ...(command.length > 0 ? ['--', ...command] : [])] }
 
   const windowsApps = join(env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps', 'wt.exe')
 
-  if (env.LOCALAPPDATA !== undefined && exists(windowsApps)) return { name: 'Windows Terminal', program: windowsApps, args: cwd => ['-d', cwd, 'claude'] }
+  if (env.LOCALAPPDATA !== undefined && exists(windowsApps)) return { name: 'Windows Terminal', program: windowsApps, args: (cwd, command) => ['-d', cwd, ...command] }
 
-  return { name: 'cmd', program: env.ComSpec ?? 'cmd.exe', args: cwd => ['/c', 'start', '/D', cwd, 'claude'] }
+  return { name: 'cmd', program: env.ComSpec ?? 'cmd.exe', args: (cwd, command) => ['/c', 'start', '/D', cwd, ...command] }
 }
 
 export function isFolder(path: string): boolean {
@@ -34,13 +35,20 @@ export function isFolder(path: string): boolean {
   }
 }
 
-export function openSession(cwd: string): { ok: true; terminal: string } | { ok: false; error: string } {
+export type Opened = { ok: true; terminal: string } | { ok: false; error: string }
+
+export function openSession(cwd: string): Opened {
+  return openTerminal(cwd, ['claude'])
+}
+
+// A terminal window in `cwd` running `command` (empty: just a shell).
+export function openTerminal(cwd: string, command: string[] = []): Opened {
   if (!isFolder(cwd)) return { ok: false, error: 'no such folder' }
 
   const terminal = pickTerminal(process.env, existsSync)
 
   try {
-    const child = spawn(terminal.program, terminal.args(cwd), { cwd, detached: true, stdio: 'ignore', windowsHide: false })
+    const child = spawn(terminal.program, terminal.args(cwd, command), { cwd, detached: true, stdio: 'ignore', windowsHide: false })
 
     child.on('error', () => undefined)
     child.unref()

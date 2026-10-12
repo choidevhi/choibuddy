@@ -1,14 +1,14 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { hostname, networkInterfaces } from 'node:os'
+import { homedir, hostname, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, DEFAULT_PORT, type HistoryEntry, type LiveStream, type Project, PROMPT_MODES, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
 import { type Config, type Device, hashToken, newToken, VERSION } from './config.ts'
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
-import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession } from './launch.ts'
+import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
 import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
@@ -51,6 +51,28 @@ export type BridgeHealth = { pcId: string; version: string; trustTailnet: boolea
 // Another of the person's PCs on the tailnet with a bridge on it.
 export type FoundBridge = { name: string; baseUrl: string; pcId: string; version: string; trustTailnet: boolean }
 
+function readCommands(path: string): CommandInfo[] {
+  try {
+    const stored = parseJsonObject(readFileSync(path, 'utf8'))
+
+    return objects(arr(stored, 'commands')).flatMap((item): CommandInfo[] => {
+      const name = str(item, 'name')
+
+      return name === null ? [] : [{ name, description: str(item, 'description') ?? '', source: str(item, 'source') ?? '' }]
+    })
+  } catch {
+    return []
+  }
+}
+
+function saveCommands(path: string, commands: CommandInfo[]): void {
+  try {
+    writeFileSync(path, `${JSON.stringify({ commands })}\n`)
+  } catch {
+    // Kept for the next restart only; the live list is in memory.
+  }
+}
+
 async function probeBridge(baseUrl: string): Promise<BridgeHealth | null> {
   try {
     const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
@@ -92,6 +114,8 @@ export type BridgeOptions = {
   now?: () => number
   holdMs?: number
   bindTailnet?: boolean
+  // The last command list, kept across restarts; defaults to commands.json beside the uploads folder.
+  commandsPath?: string
   // Names and archive flags; defaults to sessions.json beside the uploads folder.
   metaPath?: string
   // Who is on the tailnet (tests hand in a made-up one).
@@ -252,6 +276,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   let found: { at: number; list: FoundBridge[] } | null = null
 
   for (const [sessionId, name] of meta.names) store.setName(sessionId, name)
+
+  const commandsPath = options.commandsPath ?? join(options.uploadsDir, '..', 'commands.json')
+
+  store.seedCommands(readCommands(commandsPath))
 
   // Where a session the bridge lost left off, read from its transcript.
   const revival = (sessionId: string): Revival | null => {
@@ -630,6 +658,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       })
 
       if (sessionId !== null) store.setCommands(sessionId, commands)
+      if (commands.length > 0) saveCommands(commandsPath, commands)
       sendJson(res, 200, { ok: true })
 
       return
@@ -1136,6 +1165,18 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       return
     }
 
+    // A terminal on this PC: in a session's folder, or the home folder.
+    if (req.method === 'POST' && url.pathname === '/api/terminal/open') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const cwd = str(body === null ? null : parseJsonObject(body), 'cwd')?.trim() ?? ''
+      const opened = openTerminal(cwd === '' ? homedir() : cwd)
+
+      log(opened.ok ? `terminal in ${cwd === '' ? '~' : cwd} (${opened.terminal})` : `terminal failed: ${opened.error}`)
+      sendJson(res, opened.ok ? 200 : 400, opened.ok ? { ok: true, terminal: opened.terminal } : { ok: false, error: opened.error })
+
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/session/new') {
       const body = await readBody(req, API_BODY_LIMIT)
       const parsed = body === null ? null : parseJsonObject(body)
@@ -1150,14 +1191,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       return
     }
 
-    // The widget on this PC answers Claude's browser_view call.
+    // A ChoiBuddy app with its browser open answers Claude's browser_view call:
+    // this PC's, or another PC's that follows this session. A device that may
+    // send prompts may show Claude a page too; the first answer counts.
     if (req.method === 'POST' && url.pathname === '/api/browser/answer') {
-      if (caller.device !== null || !isLoopback(req.socket.remoteAddress)) {
-        sendJson(res, 403, { ok: false, error: 'owner only' })
-
-        return
-      }
-
       const body = await readBody(req, UPLOAD_LIMIT)
       const parsed = body === null ? null : parseJsonObject(body)
       const wait = browserWaits.get(str(parsed, 'id') ?? '')

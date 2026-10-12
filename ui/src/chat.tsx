@@ -1,17 +1,18 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
+import { BrowserPane } from './browser.tsx'
 import { Buddy, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type MessageKey, useI18n } from './i18n.ts'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
-import { ChevronDownIcon, ClipboardIcon, DownloadIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
+import { ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
 import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
 import { deleteConversation, fetchConversation, fetchGallery, type Uploaded } from './live.ts'
 import { Markdown } from './markdown.tsx'
 import { type PcEntry, useSessionNav } from './sessions.tsx'
-import { closeLeaf, forgetSession, leavesOf, MAX_TILES, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
+import { closeLeaf, forgetSession, leavesOf, MAX_TILES, openBrowserBeside, sessionLeavesOf, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 import { Picker } from './picker.tsx'
 import { platform, readPref } from './platform.ts'
 import { useTypewriter } from './typewriter.ts'
@@ -416,7 +417,8 @@ type PaneProps = {
   now: number
   focused: boolean
   // Several panes on screen: each gets a head that splits or closes it.
-  tiles: { canSplit: boolean; canClose: boolean; onSplit: (dir: 'row' | 'column') => void; onClose: () => void } | null
+  // `onBrowser` opens the browser beside this pane (Windows).
+  tiles: { canSplit: boolean; canClose: boolean; onSplit: (dir: 'row' | 'column') => void; onClose: () => void; onBrowser: (() => void) | null } | null
   onFocus: () => void
   onDeleted: (sessionId: string) => void
   onSend: (sessionId: string, text: string) => Promise<boolean>
@@ -653,6 +655,11 @@ function ConversationPane(props: PaneProps) {
               </span>
             )}
           </span>
+          {tiles.onBrowser !== null && (
+            <button type="button" className="icon-btn" onClick={tiles.onBrowser} aria-label={t('browser.openBeside')} title={t('browser.openBeside')}>
+              <GlobeIcon size={15} />
+            </button>
+          )}
           {tiles.canSplit && (
             <>
               <button type="button" className="icon-btn" onClick={() => tiles.onSplit('row')} aria-label={t('chat.split')} title={t('chat.split')}>
@@ -839,13 +846,17 @@ type ChatProps = {
 // left/right or top/bottom like tmux (on a wide screen), each with its own
 // prompt box.
 export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, tone, now, onSend, onUpload, loadCommands, onNewSession }: ChatProps) {
+  const { t } = useI18n()
   const [tile, setTile] = useTiles('chatTiles')
   const [focusId, setFocusId] = useState('')
   const wide = useWide(SPLIT_MIN_PX)
   const leaves = leavesOf(tile)
-  const focused = leaves.find(leaf => leaf.id === focusId) ?? leaves[0]
+  // The panes with conversations; the browser pane never takes the focus.
+  const panes = sessionLeavesOf(tile)
+  const focused = panes.find(leaf => leaf.id === focusId) ?? panes[0]
   const focusedId = focused?.sessionId ?? null
-  const shownIds = new Set(leaves.flatMap(leaf => (leaf.sessionId === null ? [] : [leaf.sessionId])))
+  const shownIds = new Set(panes.flatMap(leaf => (leaf.sessionId === null ? [] : [leaf.sessionId])))
+  const hasBrowser = leaves.length > panes.length
 
   const pick = (entry: PcEntry): void => onSelect(entry.sessionId, entry.live)
 
@@ -866,7 +877,7 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
   useEffect(() => {
     if (selectedId === null || focusedId === selectedId) return
 
-    const at = leaves.find(leaf => leaf.sessionId === selectedId)
+    const at = panes.find(leaf => leaf.sessionId === selectedId)
 
     if (at !== undefined) {
       setFocusId(at.id)
@@ -899,11 +910,14 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
 
   const close = (leafId: string): void => {
     const rest = closeLeaf(tile, leafId)
-    const first = leavesOf(rest)[0]
+    const restPanes = sessionLeavesOf(rest)
+    const first = restPanes.find(leaf => leaf.id === focused?.id) ?? restPanes[0]
 
     setTile(() => rest)
     if (first !== undefined) focusLeaf(first)
   }
+
+  const canBrowser = platform === 'windows' && (hasBrowser || leaves.length < MAX_TILES)
 
   return (
     <div className="convo convo--chat">
@@ -920,9 +934,25 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
             focusedId={focused?.id ?? ''}
             onChange={setTile}
             render={leaf => {
-              const entry = nav.entryOf(leaf.sessionId)
-              const live = sessions.find(session => session.id === leaf.sessionId) ?? null
+              // A browser pane without its own session works for the pane in focus.
+              const sessionId = leaf.view === 'browser' ? (leaf.sessionId ?? focusedId) : leaf.sessionId
+              const entry = nav.entryOf(sessionId)
+              const live = sessions.find(session => session.id === sessionId) ?? null
               const feed = feedFor(feeds, live?.pcKey ?? entry?.pcKey)
+
+              if (leaf.view === 'browser') {
+                return (
+                  <BrowserPane
+                    key={leaf.id}
+                    session={live}
+                    title={entry === null ? t('chat.paneEmpty') : entry.title === '' ? t('chat.untitled') : entry.title}
+                    onClose={() => close(leaf.id)}
+                    onSend={onSend}
+                    onUpload={onUpload}
+                    loadCommands={loadCommands}
+                  />
+                )
+              }
 
               return (
                 <ConversationPane
@@ -940,9 +970,10 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
                     wide
                       ? {
                           canSplit: leaves.length < MAX_TILES,
-                          canClose: leaves.length > 1,
+                          canClose: panes.length > 1,
                           onSplit: dir => split(leaf.id, dir),
                           onClose: () => close(leaf.id),
+                          onBrowser: canBrowser ? () => setTile(current => openBrowserBeside(current, leaf.id, leaf.sessionId)) : null,
                         }
                       : null
                   }
