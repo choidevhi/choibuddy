@@ -288,7 +288,7 @@ export class Transcripts {
         const glance = glanceAt(file.path)
         const cwd = glance.cwd ?? ''
 
-        return { sessionId: file.sessionId, project: cwd === '' ? '' : baseName(cwd), cwd, title: glance.title, updatedAt: file.mtime, live: false }
+        return { sessionId: file.sessionId, project: cwd === '' ? '' : baseName(cwd), cwd, title: glance.title, updatedAt: file.mtime, live: false, archived: false }
       })
   }
 }

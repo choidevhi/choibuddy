@@ -1,14 +1,16 @@
 import { Fragment, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { type CommandInfo, type Conversation, type HistoryEntry, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
-import { Buddy, type Tone } from './buddy.tsx'
+import { Buddy, type Mood, type Pose, tintFor, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { ago, type MessageKey, useI18n } from './i18n.ts'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { ChevronDownIcon, ClipboardIcon, PaperclipIcon, PlusIcon, SpinnerIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
 import { clipboardImageFile } from './images.tsx'
-import { deleteConversation, fetchConversation, fetchHistory, type Uploaded } from './live.ts'
+import { archiveSessions, deleteConversation, endSession, fetchConversation, fetchHistory, renameSession, type Uploaded } from './live.ts'
 import { Markdown } from './markdown.tsx'
+import { ContextMenu, type MenuEntry } from './menu.tsx'
 import { Picker } from './picker.tsx'
 import { platform, readPref } from './platform.ts'
 import { useTypewriter } from './typewriter.ts'
@@ -709,20 +711,148 @@ type ChatProps = {
   onNewSession: () => void
 }
 
-// Every conversation on every PC in a list, and on a wide screen up to four
-// of them side by side, each resizable and with its own prompt box. The pane
-// in focus follows the list (and the home screen's session).
+// What the right click (or long press) opened, and where.
+type MenuState = { entry: PcEntry; at: { x: number; y: number } }
+
+// A question before ending a session or deleting conversations.
+type Asking = { kind: 'end'; entry: PcEntry } | { kind: 'delete'; entries: PcEntry[] }
+
+type Groups = { live: PcEntry[]; ended: PcEntry[]; archived: PcEntry[] }
+
+function groupsOf(entries: PcEntry[], pcKey: string | null): Groups {
+  const groups: Groups = { live: [], ended: [], archived: [] }
+
+  for (const entry of entries) {
+    if (entry.pcKey !== pcKey) continue
+    if (entry.live) groups.live.push(entry)
+    else if (entry.archived) groups.archived.push(entry)
+    else groups.ended.push(entry)
+  }
+
+  return groups
+}
+
+function pcName(feed: Feed): string {
+  return feed.snapshot?.server.hostName ?? feed.connection.baseUrl.replace(/^https?:\/\//, '')
+}
+
+// A PC's buddy shows how that PC is doing: asking, working, resting or gone.
+function pcLook(feed: Feed, sessions: PcSession[]): { pose: Pose; mood: Mood; status: string } {
+  const mine = sessions.filter(session => session.pcKey === feed.key)
+
+  if (feed.link !== 'live') return { pose: 'closed', mood: 'sleep', status: 'ended' }
+  if (mine.some(session => session.status === 'waiting')) return { pose: 'warning', mood: 'alert', status: 'waiting' }
+  if (mine.some(session => session.status === 'working' || session.status === 'thinking')) return { pose: 'think', mood: 'busy', status: 'working' }
+
+  return { pose: 'base', mood: 'calm', status: mine.length > 0 ? 'idle' : 'ended' }
+}
+
+// The connected PCs as buddies of their own colour. A PC's name shows on hover.
+function PcRail({ feeds, sessions, shown, tone, onPick }: { feeds: Feed[]; sessions: PcSession[]; shown: string | null; tone: Tone; onPick: (key: string) => void }) {
+  const { t } = useI18n()
+  // Drawn on the page itself: inside the scrolling rail it is cut off.
+  const [tip, setTip] = useState<{ name: string; top: number; left: number } | null>(null)
+
+  const showTip = (name: string, element: HTMLElement): void => {
+    const rect = element.getBoundingClientRect()
+
+    setTip({ name, top: rect.top + rect.height / 2, left: rect.right + 8 })
+  }
+
+  return (
+    <nav className="pc-rail" aria-label={t('chat.pcs')}>
+      {feeds.map(feed => {
+        const look = pcLook(feed, sessions)
+        const name = feed.local ? `${pcName(feed)} · ${t('connect.thisPc')}` : pcName(feed)
+
+        return (
+          <button
+            type="button"
+            key={feed.key}
+            className={`pc-rail-item ${feed.key === shown ? 'on' : ''}`}
+            aria-label={name}
+            onClick={() => onPick(feed.key)}
+            onMouseEnter={event => showTip(name, event.currentTarget)}
+            onMouseLeave={() => setTip(null)}
+            onFocus={event => showTip(name, event.currentTarget)}
+            onBlur={() => setTip(null)}
+          >
+            <Buddy pose={look.pose} mood={look.mood} tone={tone} tint={tintFor(feed.key)} size={30} />
+            {look.status === 'waiting' && <span className="pc-rail-badge" />}
+          </button>
+        )
+      })}
+      {tip !== null &&
+        createPortal(
+          <div className="pc-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>
+            {tip.name}
+          </div>,
+          document.body,
+        )}
+    </nav>
+  )
+}
+
+function RenameSheet({ entry, onSave, onCancel }: { entry: PcEntry; onSave: (title: string) => void; onCancel: () => void }) {
+  const { t } = useI18n()
+  const [title, setTitle] = useState(entry.title)
+
+  useBackLayer(true, onCancel)
+
+  return (
+    <div className="sheet-backdrop" onClick={onCancel}>
+      <div className="sheet confirm-sheet" role="dialog" aria-modal="true" aria-label={t('rename.title')} onClick={event => event.stopPropagation()}>
+        <div className="confirm-body">
+          <div className="sheet-title">{t('rename.title')}</div>
+          <div className="confirm-hint">{t('rename.hint')}</div>
+          <input
+            className="field"
+            autoFocus
+            value={title}
+            maxLength={120}
+            placeholder={entry.project}
+            onChange={event => setTitle(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) onSave(title)
+            }}
+          />
+        </div>
+        <footer className="sheet-actions">
+          <button type="button" className="btn btn--deny" onClick={onCancel}>
+            {t('action.cancel')}
+          </button>
+          <button type="button" className="btn btn--allow" onClick={() => onSave(title)}>
+            {t('rename.save')}
+          </button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+// Every conversation, PC by PC: the PCs as buddies on the left, the chosen
+// PC's sessions next to them (open ones, then ended ones, then the archive),
+// and on a wide screen up to four conversations side by side, each resizable
+// and with its own prompt box. A right click (long press on a phone) on a
+// session renames, ends, archives or deletes it.
 export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, tone, now, onSend, onUpload, loadCommands, onNewSession }: ChatProps) {
   const { t } = useI18n()
   const [history, setHistory] = useState<PcEntry[]>([])
+  const [reloadAt, setReloadAt] = useState(0)
   const [split, setSplit] = useState<Split>(readSplit)
   const [focus, setFocus] = useState(0)
+  const [pcKey, setPcKey] = useState<string | null>(null)
+  const [showArchive, setShowArchive] = useState(false)
+  const [menu, setMenu] = useState<MenuState | null>(null)
+  const [renaming, setRenaming] = useState<PcEntry | null>(null)
+  const [asking, setAsking] = useState<Asking | null>(null)
+  const [busy, setBusy] = useState(false)
   const wide = useWide()
   const row = useRef<HTMLDivElement>(null)
   const liveIds = sessions.map(session => session.id).join(',')
   const feedIds = feeds.map(feed => `${feed.key}#${feed.connection.token}`).join('|')
 
-  // Every PC's sessions in one list: live ones first, then the newest.
+  // Every PC's sessions: live ones first, then the newest.
   useEffect(() => {
     const load = (): void => {
       void Promise.all(
@@ -748,7 +878,7 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
 
     return () => window.clearInterval(timer)
     // feedIds and liveIds stand for the feeds and sessions that matter here.
-  }, [feedIds, liveIds])
+  }, [feedIds, liveIds, reloadAt])
 
   useEffect(() => saveSplit(split), [split])
 
@@ -776,9 +906,30 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
   const entries: PcEntry[] =
     history.length > 0
       ? history
-      : sessions.map(session => ({ sessionId: session.id, project: session.name, cwd: session.cwd, title: '', updatedAt: session.updatedAt, live: true, pcKey: session.pcKey, pcName: session.pcName }))
+      : sessions.map(session => ({
+          sessionId: session.id,
+          project: session.name,
+          cwd: session.cwd,
+          title: '',
+          updatedAt: session.updatedAt,
+          live: true,
+          archived: false,
+          pcKey: session.pcKey,
+          pcName: session.pcName,
+        }))
 
   const entryOf = (sessionId: string | null): PcEntry | null => (sessionId === null ? null : (entries.find(entry => entry.sessionId === sessionId) ?? null))
+  const focusedPc = entryOf(focusedId)?.pcKey ?? null
+
+  // The list follows the PC of the conversation in focus (picked here or on the home screen).
+  useEffect(() => {
+    if (focusedPc !== null) setPcKey(focusedPc)
+  }, [focusedPc])
+
+  const shownPc = pcKey !== null && feeds.some(feed => feed.key === pcKey) ? pcKey : (focusedPc ?? feeds[0]?.key ?? null)
+  const shownFeed = feeds.find(feed => feed.key === shownPc) ?? null
+  const groups = groupsOf(entries, shownPc)
+  const statusOf = (entry: PcEntry): string => (entry.live ? (sessions.find(session => session.id === entry.sessionId)?.status ?? 'ended') : 'ended')
 
   const pick = (entry: PcEntry): void => onSelect(entry.sessionId, entry.live)
 
@@ -817,6 +968,86 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
     setSplit(current => ({ ...current, panes: current.panes.map(id => (id === sessionId ? null : id)) }))
   }
 
+  const connectionOf = (entry: PcEntry) => feedFor(feeds, entry.pcKey)?.connection ?? null
+
+  const archive = async (list: PcEntry[], archived: boolean): Promise<void> => {
+    const connection = list[0] === undefined ? null : connectionOf(list[0])
+
+    if (connection === null) return
+
+    const ids = new Set(list.map(entry => entry.sessionId))
+    const ok = await archiveSessions(connection, [...ids], archived)
+
+    if (!ok) {
+      showToast(t('chat.actionFailed'))
+
+      return
+    }
+
+    setHistory(current => current.map(entry => (ids.has(entry.sessionId) ? { ...entry, archived } : entry)))
+    showToast(archived ? t('chat.archivedToast', { n: ids.size }) : t('chat.unarchivedToast', { n: ids.size }))
+  }
+
+  const rename = async (entry: PcEntry, title: string): Promise<void> => {
+    const connection = connectionOf(entry)
+
+    setRenaming(null)
+
+    if (connection === null || !(await renameSession(connection, entry.sessionId, title))) {
+      showToast(t('chat.actionFailed'))
+
+      return
+    }
+
+    // An empty name goes back to Claude Code's, which the list reads again.
+    if (title.trim() === '') setReloadAt(Date.now())
+    else setHistory(current => current.map(item => (item.sessionId === entry.sessionId ? { ...item, title: title.replace(/\s+/g, ' ').trim() } : item)))
+  }
+
+  const end = async (entry: PcEntry): Promise<void> => {
+    const connection = connectionOf(entry)
+    const result = connection === null ? 'failed' : await endSession(connection, entry.sessionId)
+
+    showToast(result === 'sent' ? t('chat.endSent') : result === 'no-mod' ? t('chat.endNoMod') : t('chat.actionFailed'))
+  }
+
+  const remove = async (list: PcEntry[]): Promise<void> => {
+    let failed = 0
+
+    for (const entry of list) {
+      const connection = connectionOf(entry)
+      const result = connection === null ? 'failed' : await deleteConversation(connection, entry.sessionId)
+
+      if (result === 'deleted') onDeleted(entry.sessionId)
+      else failed += 1
+    }
+
+    if (failed > 0) showToast(t('chat.actionFailed'))
+  }
+
+  const menuItems = (entry: PcEntry): Array<MenuEntry | null> => {
+    const renameItem: MenuEntry = { label: t('menu.rename'), onSelect: () => setRenaming(entry) }
+
+    if (entry.live) {
+      const canEnd = sessions.find(session => session.id === entry.sessionId)?.canPrompt === true
+
+      return [renameItem, null, { label: t('menu.end'), danger: true, disabled: !canEnd, hint: canEnd ? undefined : t('menu.endNoMod'), onSelect: () => setAsking({ kind: 'end', entry }) }]
+    }
+
+    const ended = groupsOf(entries, entry.pcKey).ended
+
+    return [
+      renameItem,
+      { label: entry.archived ? t('menu.unarchive') : t('menu.archive'), onSelect: () => void archive([entry], !entry.archived) },
+      { label: t('menu.delete'), danger: true, onSelect: () => setAsking({ kind: 'delete', entries: [entry] }) },
+      null,
+      { label: t('chat.archiveEnded', { n: ended.length }), disabled: ended.length === 0, onSelect: () => void archive(ended, true) },
+      { label: t('chat.deleteEnded', { n: ended.length }), danger: true, disabled: ended.length === 0, onSelect: () => setAsking({ kind: 'delete', entries: ended }) },
+    ]
+  }
+
+  const openMenu = (entry: PcEntry, at: { x: number; y: number }): void => setMenu({ entry, at })
+
   // Dragging the line between two panes moves their shares of the width.
   const resize = (index: number, start: { clientX: number }): void => {
     const element = row.current
@@ -849,57 +1080,111 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
   }
 
   const shownIds = new Set(split.panes)
+  const titleOf = (entry: PcEntry): string => (entry.title === '' ? t('chat.untitled') : entry.title)
+  const metaOf = (entry: PcEntry): string => `${entry.project} · ${entry.live ? t('chat.live') : ago(t, now - entry.updatedAt)}`
+
+  const sessionRow = (entry: PcEntry) => (
+    <button
+      type="button"
+      key={entry.sessionId}
+      className={`convo-item ${entry.sessionId === focusedId ? 'on' : shownIds.has(entry.sessionId) ? 'shown' : ''} ${entry.live ? '' : 'convo-item--ended'}`}
+      onClick={() => pick(entry)}
+      onContextMenu={event => {
+        event.preventDefault()
+        openMenu(entry, { x: event.clientX, y: event.clientY })
+      }}
+    >
+      <span className={`status-dot convo-dot dot--${statusOf(entry)}`} />
+      <span className="convo-item-text">
+        <span className="convo-title">{titleOf(entry)}</span>
+        <span className="convo-meta">{metaOf(entry)}</span>
+      </span>
+    </button>
+  )
+
+  const pickerOption = (entry: PcEntry, group: string) => ({ value: entry.sessionId, label: titleOf(entry), hint: metaOf(entry), dot: `dot--${statusOf(entry)}`, group })
 
   return (
-    <div className="convo">
+    <div className="convo convo--chat">
+      <PcRail feeds={feeds} sessions={sessions} shown={shownPc} tone={tone} onPick={setPcKey} />
+
       <aside className="convo-list">
         <div className="section-label convo-list-head">
-          {t('chat.sessions')}
+          <span className="convo-list-pc">{shownFeed === null ? t('chat.sessions') : pcName(shownFeed)}</span>
           <button type="button" className="btn small" onClick={onNewSession} title={t('newSession.title')}>
             <PlusIcon size={13} /> {t('chat.newSession')}
           </button>
         </div>
-        {entries.map(entry => {
-          const status = sessions.find(session => session.id === entry.sessionId)?.status ?? 'ended'
-          const inFocus = entry.sessionId === focusedId
-
-          return (
-            <button
-              type="button"
-              key={entry.sessionId}
-              className={`convo-item ${inFocus ? 'on' : shownIds.has(entry.sessionId) ? 'shown' : ''}`}
-              onClick={() => pick(entry)}
-            >
-              <span className={`status-dot convo-dot dot--${entry.live ? status : 'ended'}`} />
-              <span className="convo-item-text">
-                <span className="convo-title">{entry.title === '' ? t('chat.untitled') : entry.title}</span>
-                <span className="convo-meta">
-                  {entry.project}
-                  {multiPc && entry.pcName !== '' && ` · ${entry.pcName}`} · {entry.live ? t('chat.live') : ago(t, now - entry.updatedAt)}
-                </span>
-              </span>
+        {groups.live.map(sessionRow)}
+        {groups.live.length === 0 && <div className="convo-none">{t('chat.noOpen')}</div>}
+        {groups.ended.length > 0 && (
+          <div className="convo-divider">
+            <span className="convo-divider-label">
+              {t('chat.groupEnded')} · {groups.ended.length}
+            </span>
+            <button type="button" className="link-btn" onClick={() => void archive(groups.ended, true)}>
+              {t('chat.archiveAll')}
             </button>
-          )
-        })}
+            <button type="button" className="link-btn link-btn--danger" onClick={() => setAsking({ kind: 'delete', entries: groups.ended })}>
+              {t('chat.deleteAll')}
+            </button>
+          </div>
+        )}
+        {groups.ended.map(sessionRow)}
+        {groups.archived.length > 0 && (
+          <button type="button" className="convo-divider convo-archive-toggle" onClick={() => setShowArchive(!showArchive)} aria-expanded={showArchive}>
+            <span className="convo-divider-label">
+              {t('chat.groupArchived')} · {groups.archived.length}
+            </span>
+            <span className="picker-caret">{showArchive ? '▾' : '▸'}</span>
+          </button>
+        )}
+        {showArchive && groups.archived.map(sessionRow)}
       </aside>
 
       <div className="convo-panes">
         <div className="convo-select-row">
+          {feeds.length > 1 && (
+            <div className="pc-chips" role="tablist" aria-label={t('chat.pcs')}>
+              {feeds.map(feed => {
+                const look = pcLook(feed, sessions)
+
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    key={feed.key}
+                    aria-selected={feed.key === shownPc}
+                    aria-label={pcName(feed)}
+                    title={pcName(feed)}
+                    className={`pc-chip ${feed.key === shownPc ? 'on' : ''}`}
+                    onClick={() => setPcKey(feed.key)}
+                  >
+                    <Buddy pose={look.pose} mood={look.mood} tone={tone} tint={tintFor(feed.key)} size={24} />
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <Picker
             className="convo-select"
             value={focusedId}
-            title={t('chat.sessions')}
+            title={shownFeed === null ? t('chat.sessions') : pcName(shownFeed)}
             placeholder={t('chat.empty')}
-            options={entries.map(entry => ({
-              value: entry.sessionId,
-              label: entry.title === '' ? t('chat.untitled') : entry.title,
-              hint: `${entry.project}${multiPc && entry.pcName !== '' ? ` · ${entry.pcName}` : ''} · ${entry.live ? t('chat.live') : ago(t, now - entry.updatedAt)}`,
-              dot: `dot--${entry.live ? (sessions.find(session => session.id === entry.sessionId)?.status ?? 'ended') : 'ended'}`,
-            }))}
+            options={[
+              ...groups.live.map(entry => pickerOption(entry, t('chat.groupLive'))),
+              ...groups.ended.map(entry => pickerOption(entry, t('chat.groupEnded'))),
+              ...groups.archived.map(entry => pickerOption(entry, t('chat.groupArchived'))),
+            ]}
             onChange={sessionId => {
               const entry = entries.find(item => item.sessionId === sessionId)
 
               if (entry !== undefined) pick(entry)
+            }}
+            onOptionMenu={(sessionId, at) => {
+              const entry = entries.find(item => item.sessionId === sessionId)
+
+              if (entry !== undefined) openMenu(entry, at)
             }}
           />
           <button type="button" className="icon-btn convo-new" onClick={onNewSession} title={t('newSession.title')}>
@@ -951,6 +1236,29 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
           })}
         </div>
       </div>
+
+      {menu !== null && <ContextMenu at={menu.at} title={titleOf(menu.entry)} items={menuItems(menu.entry)} onClose={() => setMenu(null)} />}
+
+      {renaming !== null && <RenameSheet entry={renaming} onSave={title => void rename(renaming, title)} onCancel={() => setRenaming(null)} />}
+
+      {asking !== null && (
+        <ConfirmSheet
+          title={asking.kind === 'end' ? t('chat.endTitle') : asking.entries.length === 1 ? t('chat.deleteTitle') : t('chat.deleteManyTitle', { n: asking.entries.length })}
+          hint={asking.kind === 'end' ? `${titleOf(asking.entry)}\n\n${t('chat.endHint')}` : t('chat.deleteHint')}
+          confirmLabel={asking.kind === 'end' ? t('chat.endConfirm') : t('action.delete')}
+          busy={busy}
+          onConfirm={() => {
+            const current = asking
+
+            setBusy(true)
+            void (current.kind === 'end' ? end(current.entry) : remove(current.entries)).finally(() => {
+              setBusy(false)
+              setAsking(null)
+            })
+          }}
+          onCancel={() => setAsking(null)}
+        />
+      )}
     </div>
   )
 }

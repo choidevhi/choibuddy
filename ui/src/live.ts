@@ -317,3 +317,65 @@ export async function answerBrowser(connection: Connection, id: string, answer: 
 
   return res?.ok === true
 }
+
+async function post(connection: Connection, path: string, body: Record<string, string | boolean | string[]>): Promise<Response | null> {
+  return fetch(`${connection.baseUrl}${path}`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify(body) }).catch(() => null)
+}
+
+// A name given in ChoiBuddy; an empty one goes back to Claude Code's.
+export async function renameSession(connection: Connection, sessionId: string, title: string): Promise<boolean> {
+  return (await post(connection, '/api/sessions/rename', { sessionId, title }))?.ok === true
+}
+
+// Puts ended sessions away under the archive, or brings them back.
+export async function archiveSessions(connection: Connection, sessionIds: string[], archived: boolean): Promise<boolean> {
+  return (await post(connection, '/api/sessions/archive', { sessionIds, archived }))?.ok === true
+}
+
+export type EndResult = 'sent' | 'no-mod' | 'failed'
+
+// Asks Claude Code on the PC to close the session (/exit).
+export async function endSession(connection: Connection, sessionId: string): Promise<EndResult> {
+  const res = await post(connection, '/api/sessions/end', { sessionId })
+
+  if (res?.ok === true) return 'sent'
+
+  return res?.status === 409 ? 'no-mod' : 'failed'
+}
+
+export async function setTrustTailnet(connection: Connection, on: boolean): Promise<boolean> {
+  return (await post(connection, '/api/tailnet/trust', { on }))?.ok === true
+}
+
+// Another of the person's PCs with a bridge, as a bridge found it on the tailnet.
+export type FoundBridge = { name: string; baseUrl: string; pcId: string; trustTailnet: boolean }
+
+export async function fetchTailnetBridges(connection: Connection): Promise<FoundBridge[]> {
+  try {
+    const res = await fetch(`${connection.baseUrl}/api/tailnet/bridges`, { headers: authHeaders(connection) })
+    const body: { bridges?: Array<{ name?: unknown; baseUrl?: unknown; pcId?: unknown; trustTailnet?: unknown }> } = await res.json()
+    const found: FoundBridge[] = []
+
+    for (const item of Array.isArray(body.bridges) ? body.bridges : []) {
+      if (typeof item.baseUrl !== 'string' || typeof item.pcId !== 'string') continue
+      found.push({ name: typeof item.name === 'string' ? item.name : item.baseUrl, baseUrl: item.baseUrl, pcId: item.pcId, trustTailnet: item.trustTailnet === true })
+    }
+
+    return found
+  } catch {
+    return []
+  }
+}
+
+// Asks a bridge that trusts its tailnet for a code of this device's own. It
+// answers only over Tailscale and only to the same account's devices.
+export async function claimTailnet(baseUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${baseUrl}/api/tailnet/claim`, { method: 'POST', signal: AbortSignal.timeout(4000) })
+    const body: { token?: unknown } = await res.json()
+
+    return res.ok && typeof body.token === 'string' ? body.token : null
+  } catch {
+    return null
+  }
+}

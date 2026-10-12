@@ -21,6 +21,7 @@ type UsageReport = {
 type PollReply = {
   prompts?: Array<{ id?: string; text?: string; mode?: string }>
   commands?: Array<{ id?: string; command?: string; args?: string }>
+  needCommands?: boolean
 }
 
 // How a prompt from a device meets a turn that is still running: steer (the
@@ -116,6 +117,17 @@ async function steerNow($: EngineInterface, sessionId: string): Promise<void> {
 }
 
 // Slash commands from the same reply, by name without the slash.
+// The bridge restarted since the session started and lost its command list.
+export function needsCommands(reply: string): boolean {
+  try {
+    const parsed: PollReply = JSON.parse(reply)
+
+    return parsed.needCommands === true
+  } catch {
+    return false
+  }
+}
+
 export function commandsOf(reply: string): QueuedCommand[] {
   try {
     const parsed: PollReply = JSON.parse(reply)
@@ -188,6 +200,7 @@ async function poll($: EngineInterface, sessionId: string): Promise<void> {
   }
 
   for (const command of commandsOf(reply)) await runCommand($, sessionId, command)
+  if (needsCommands(reply)) await reportCommands($, sessionId).catch(() => undefined)
 }
 
 async function reportCommands($: EngineInterface, sessionId: string): Promise<void> {

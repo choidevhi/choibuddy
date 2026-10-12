@@ -25,7 +25,8 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 
 ![Several conversations, side by side](promo/en/02-split.png)
 
-- **Chat.** Whole conversations from the session transcripts, past sessions included. Send prompts and attach files (from the home screen too), delete finished conversations, and on a PC split the window into up to 4 conversations.
+- **Chat, PC by PC.** Your PCs sit on the left as buddies of their own colour (hover for the name), then the chosen PC's sessions: open ones, ended ones under a divider, and the archive. Whole conversations come from the session transcripts. Send prompts and attach files (from the home screen too), and on a PC split the window into up to 4 conversations.
+- **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), archive it or delete it. Ended sessions can be archived or deleted all at once.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
 - **New sessions.** Pick a PC, a folder and a first prompt, and Claude Code opens in a new terminal on that PC.
@@ -52,8 +53,8 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 
 ![A tiny buddy in the corner](promo/en/08-float.png)
 
-- **Floating buddy (Windows).** Approvals, progress and results in speech bubbles. Drag it wherever you like.
-- **Several PCs.** Watch the bridges on all your PCs together.
+- **Floating buddy (Windows).** Approvals, progress and results in speech bubbles. Drag it wherever you like. Right-click it to open ChoiBuddy, turn the sound on or off, reset its position, hide it or quit.
+- **Several PCs.** Watch the bridges on all your PCs together. Turn on **Connect my Tailscale devices automatically** in a PC's danger zone and your other devices on the same Tailscale account connect to it without a code (a phone needs one PC paired by QR first).
 - **Auto Accept.** Allow permission requests automatically for a set time.
 
 ## Getting started
@@ -100,6 +101,8 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
   - **Deleting** a conversation moves only a finished session's transcript to `~/.choibuddy/trash`. Removing an image only changes the list; just the screenshots the bridge saved are deleted.
 - **Docs tab.** It only reads and writes instruction files with known names, by their id from the list, up to 1 MB. Each file is backed up to `~/.choibuddy/doc-backups` before it is saved. Instruction files change how Claude behaves, so a device with a code has that much power too.
 - **Auto Accept.** It lives in memory only, so it turns off when the bridge restarts. It allows ordinary permission requests only; questions and plans always need a person.
+- **Connecting Tailscale devices automatically.** Off unless you turn it on for this PC. A device then gets a code of its own only over Tailscale, and only when Tailscale says it is signed in to the same account as this PC. Devices shared with you and tagged devices are left out. Each one shows in the device list and can be cut off, and turning the option off cuts all of them. Anyone who can sign in to your Tailscale account could connect, so keep that account safe.
+- **Ending a session** sends `/exit` through the companion mod, the same as typing it in the terminal. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
 - **New sessions.** A terminal opens only when the folder exists, and it starts without going through a shell (the program and its arguments are passed separately).
 - **Built-in browser.** Pages get no access to the app's IPC; a page can only send the app the element you picked and its address. Only the app on this PC can answer Claude's `browser_view` calls.
 

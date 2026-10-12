@@ -174,6 +174,8 @@ export type HistoryEntry = {
   title: string
   updatedAt: number
   live: boolean
+  // Put away by the person (ended sessions only): listed under the archive.
+  archived: boolean
 }
 
 export type SessionStatus = 'thinking' | 'working' | 'waiting' | 'done' | 'idle' | 'error' | 'ended'
@@ -332,6 +334,8 @@ export type ServerInfo = {
   version: string
   // Permission requests are approved without asking until then (0: off).
   autoAcceptUntil: number
+  // The person's own Tailscale devices connect without a code.
+  trustTailnet: boolean
 }
 
 export type Snapshot = {

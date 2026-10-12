@@ -125,6 +125,8 @@ export class Store {
   // Sessions Claude Code ended while this bridge ran. A mod that still polls
   // for one does not bring it back.
   readonly #ended = new Set<string>()
+  // Names people gave sessions in ChoiBuddy; shown instead of the folder's.
+  readonly #names = new Map<string, string>()
   readonly #transcripts = new Map<string, string>()
   readonly #outgoing = new Map<string, Outgoing[]>()
   readonly #commandsOut = new Map<string, OutgoingCommand[]>()
@@ -134,6 +136,16 @@ export class Store {
 
   constructor(deps: StoreDeps) {
     this.#deps = deps
+  }
+
+  // null goes back to the folder's name.
+  setName(sessionId: string, name: string | null): void {
+    if (name === null) this.#names.delete(sessionId)
+    else this.#names.set(sessionId, name)
+  }
+
+  #nameOf(session: Session): string {
+    return this.#names.get(session.id) ?? session.name
   }
 
   transcriptPath(sessionId: string): string | null {
@@ -216,7 +228,7 @@ export class Store {
     return {
       type,
       sessionId: session.id,
-      sessionName: session.name,
+      sessionName: this.#nameOf(session),
       text,
       pendingId: pending?.id ?? null,
       pendingKind: pending?.kind ?? null,
@@ -515,7 +527,7 @@ export class Store {
     const pending: Pending = {
       id: this.#deps.newId(),
       sessionId: session.id,
-      sessionName: session.name,
+      sessionName: this.#nameOf(session),
       kind,
       tool,
       detail: pendingDetail(kind, tool, toolInput, questions),
@@ -649,6 +661,12 @@ export class Store {
     session.usage = usage
 
     return true
+  }
+
+  // The mod reports a session's commands when the session starts; a bridge
+  // that restarted since has none and asks again on the next poll.
+  knowsCommands(sessionId: string): boolean {
+    return this.#commands.has(sessionId)
   }
 
   setCommands(sessionId: string, commands: CommandInfo[]): void {
@@ -824,12 +842,17 @@ export class Store {
     const sessions = [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt)
     const counts = new Map<string, number>()
 
-    for (const session of sessions) counts.set(session.name, (counts.get(session.name) ?? 0) + 1)
+    for (const session of sessions) counts.set(this.#nameOf(session), (counts.get(this.#nameOf(session)) ?? 0) + 1)
 
     const now = this.#deps.now()
+    // Two sessions in the same folder are told apart by their ids; a name
+    // the person picked is shown as it is.
     const named = sessions.map(session => ({
       ...session,
-      name: counts.get(session.name) === 1 ? session.name : `${session.name} · ${session.id.slice(0, 4)}`,
+      name:
+        this.#names.has(session.id) || counts.get(this.#nameOf(session)) === 1
+          ? this.#nameOf(session)
+          : `${session.name} · ${session.id.slice(0, 4)}`,
       canPrompt: this.#modAlive(session.id, now),
       canCommand: this.#modAlive(session.id, now) && this.#commands.has(session.id),
       queued: [

@@ -3,16 +3,18 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeF
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { hostname, networkInterfaces } from 'node:os'
 import { join } from 'node:path'
-import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, type HistoryEntry, type LiveStream, type Project, PROMPT_MODES, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
+import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, DEFAULT_PORT, type HistoryEntry, type LiveStream, type Project, PROMPT_MODES, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
 import { type Config, type Device, hashToken, newToken, VERSION } from './config.ts'
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession } from './launch.ts'
+import { SessionMeta } from './meta.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
 import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
 import { baseName, type FileReader, languageOf } from './previews.ts'
 import { parseHookInput, parseSlash, type Revival, Store } from './store.ts'
+import { ownDevice, plainIp, readStatus, Tailnet } from './tailnet.ts'
 import { purgeTrash } from './trash.ts'
 
 const HOOK_BODY_LIMIT = 32 * 1024 * 1024
@@ -36,6 +38,31 @@ const LAST_SEEN_SAVE_MS = 60_000
 const BROWSER_WAIT_MS = 15_000
 const PROJECT_LIMIT = 30
 const PROJECT_AGE_MS = 60 * 24 * 60 * 60_000
+// One code per device and address at a time, however often it asks.
+const CLAIM_GAP_MS = 5_000
+const DISCOVER_CACHE_MS = 60_000
+const PROBE_TIMEOUT_MS = 1_200
+// Phones never run a bridge.
+const PHONE_OS = new Set(['android', 'iOS'])
+
+// What a ChoiBuddy bridge says about itself at /api/health.
+export type BridgeHealth = { pcId: string; version: string; trustTailnet: boolean }
+
+// Another of the person's PCs on the tailnet with a bridge on it.
+export type FoundBridge = { name: string; baseUrl: string; pcId: string; version: string; trustTailnet: boolean }
+
+async function probeBridge(baseUrl: string): Promise<BridgeHealth | null> {
+  try {
+    const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+    const body = parseJsonObject(await res.text())
+
+    if (str(body, 'name') !== 'choibuddy') return null
+
+    return { pcId: str(body, 'pcId') ?? '', version: str(body, 'version') ?? '', trustTailnet: bool(body, 'trustTailnet') ?? false }
+  } catch {
+    return null
+  }
+}
 
 // "Linux; Android 16; SM-S938N Build/..." → "SM-S938N"; a WebView2 window → "Windows".
 export function deviceName(userAgent: string | undefined): string {
@@ -65,6 +92,12 @@ export type BridgeOptions = {
   now?: () => number
   holdMs?: number
   bindTailnet?: boolean
+  // Names and archive flags; defaults to sessions.json beside the uploads folder.
+  metaPath?: string
+  // Who is on the tailnet (tests hand in a made-up one).
+  tailscale?: Tailnet
+  // Asks an address whether a bridge answers there.
+  probe?: (baseUrl: string) => Promise<BridgeHealth | null>
 }
 
 export type Bridge = {
@@ -211,6 +244,14 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const gallery = new Gallery(options.galleryDir, now, randomUUID)
   const store = new Store({ read: options.read ?? readPreviewFile, now, newId: randomUUID, gallery })
   const transcripts = new Transcripts(join(options.claudeDir, 'projects'))
+  const meta = new SessionMeta(options.metaPath ?? join(options.uploadsDir, '..', 'sessions.json'))
+  const tailscale = options.tailscale ?? new Tailnet(readStatus, now)
+  const probe = options.probe ?? probeBridge
+  // When each tailnet address last asked for a code.
+  const claims = new Map<string, number>()
+  let found: { at: number; list: FoundBridge[] } | null = null
+
+  for (const [sessionId, name] of meta.names) store.setName(sessionId, name)
 
   // Where a session the bridge lost left off, read from its transcript.
   const revival = (sessionId: string): Revival | null => {
@@ -252,7 +293,79 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     tailnetUrl: tailnet === null ? null : `http://${tailnet.ip}:${config.port}`,
     version: VERSION,
     autoAcceptUntil: autoAcceptUntil > now() ? autoAcceptUntil : 0,
+    trustTailnet: config.trustTailnet,
   })
+
+  // The person's other PCs with a bridge, found on the tailnet; this one left out.
+  const discover = async (): Promise<FoundBridge[]> => {
+    if (found !== null && now() - found.at < DISCOVER_CACHE_MS) return found.list
+
+    const view = await tailscale.view()
+    const ports = [...new Set([DEFAULT_PORT, config.port])]
+    const candidates = view.peers.flatMap(peer =>
+      peer.mine && peer.online && !PHONE_OS.has(peer.os) ? ports.map(port => ({ name: peer.name, baseUrl: `http://${peer.ip}:${port}` })) : [],
+    )
+    const answers = await Promise.all(candidates.map(async candidate => ({ candidate, health: await probe(candidate.baseUrl) })))
+    const list: FoundBridge[] = []
+
+    for (const { candidate, health } of answers) {
+      if (health === null || health.pcId === '' || health.pcId === config.pcId || list.some(item => item.pcId === health.pcId)) continue
+      list.push({ ...candidate, ...health })
+    }
+
+    found = { at: now(), list }
+
+    return list
+  }
+
+  // One of the person's own Tailscale devices asks for a code of its own.
+  // Only over the tailnet, only while this PC trusts its tailnet, and only
+  // when Tailscale says the address is a device of the same account.
+  const handleClaim = async (req: IncomingMessage, res: ServerResponse, loopbackListener: boolean): Promise<void> => {
+    const ip = plainIp(req.socket.remoteAddress)
+
+    if (req.method !== 'POST' || loopbackListener) {
+      sendJson(res, 403, { ok: false, error: 'tailnet only' })
+
+      return
+    }
+
+    if (!config.trustTailnet) {
+      sendJson(res, 403, { ok: false, error: 'off' })
+
+      return
+    }
+
+    if (now() - (claims.get(ip) ?? 0) < CLAIM_GAP_MS) {
+      sendJson(res, 429, { ok: false, error: 'too soon' })
+
+      return
+    }
+
+    claims.set(ip, now())
+
+    const owner = ownDevice(await tailscale.view(), ip)
+
+    if (owner === null) {
+      log(`tailnet claim refused for ${ip}: not one of this account's devices`)
+      sendJson(res, 403, { ok: false, error: 'not yours' })
+
+      return
+    }
+
+    const token = newToken()
+    const replaced = config.devices.filter(device => device.tailnet === ip)
+    const name = owner === 'self' ? serverInfo().hostName : owner
+
+    config.devices = [
+      ...config.devices.filter(device => device.tailnet !== ip),
+      { id: randomUUID().slice(0, 8), name, hash: hashToken(token), createdAt: now(), lastSeen: null, tailnet: ip },
+    ]
+    for (const device of replaced) dropDevice(device.id)
+    options.saveConfig(config)
+    log(`tailnet device ${name} (${ip}) connected by itself`)
+    sendJson(res, 200, { ok: true, token, pcId: config.pcId, hostName: serverInfo().hostName })
+  }
 
   const sendEvent = (event: string, data: string): void => {
     for (const client of clients.keys()) client.write(`event: ${event}\ndata: ${data}\n\n`)
@@ -367,7 +480,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     if (req.method === 'POST' && url.pathname === '/api/devices') {
       const token = newToken()
-      const device: Device = { id: randomUUID().slice(0, 8), name: '', hash: hashToken(token), createdAt: now(), lastSeen: null }
+      const device: Device = { id: randomUUID().slice(0, 8), name: '', hash: hashToken(token), createdAt: now(), lastSeen: null, tailnet: null }
 
       config.devices = [...liveDevices(), device]
       options.saveConfig(config)
@@ -483,7 +596,8 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
         log(`delivering ${prompts.length} prompt(s), ${commands.length} command(s) to ${sessionId}`)
         scheduleSnapshot()
       }
-      sendJson(res, 200, { ok: true, prompts, commands })
+      // A bridge that restarted lost the session's commands: the mod sends them again.
+      sendJson(res, 200, { ok: true, prompts, commands, needCommands: sessionId !== null && !store.knowsCommands(sessionId) })
 
       return
     }
@@ -572,7 +686,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     const firstUse = device.lastSeen === null
 
     device.lastSeen = now()
-    if (firstUse) device.name = deviceName(req.headers['user-agent'])
+    if (firstUse && device.name === '') device.name = deviceName(req.headers['user-agent'])
     if (firstUse || now() - lastSeenSave > LAST_SEEN_SAVE_MS) {
       lastSeenSave = now()
       options.saveConfig(config)
@@ -755,13 +869,19 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
           sessionId: session.id,
           project: session.name,
           cwd: session.cwd,
-          title: path === null ? '' : transcripts.reader(path).bestTitle,
+          title: meta.name(session.id) ?? (path === null ? '' : transcripts.reader(path).bestTitle),
           updatedAt: session.updatedAt,
           live: true,
+          archived: false,
         }
       })
       const liveIds = new Set(live.map(entry => entry.sessionId))
-      const past = transcripts.recent(HISTORY_LIMIT, HISTORY_AGE_MS, now()).filter(entry => !liveIds.has(entry.sessionId))
+      const past: HistoryEntry[] = []
+
+      for (const entry of transcripts.recent(HISTORY_LIMIT, HISTORY_AGE_MS, now())) {
+        if (liveIds.has(entry.sessionId)) continue
+        past.push({ ...entry, title: meta.name(entry.sessionId) ?? entry.title, archived: meta.archived(entry.sessionId) })
+      }
 
       sendJson(res, 200, { sessions: [...live.sort((a, b) => b.updatedAt - a.updatedAt), ...past] })
 
@@ -886,10 +1006,111 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
       if (moved) {
         store.dismiss(sessionId)
+        meta.forget(sessionId)
         log(`conversation ${sessionId} moved to trash`)
         scheduleSnapshot()
       }
       sendJson(res, moved ? 200 : 404, { ok: moved })
+
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/sessions/rename') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const parsed = body === null ? null : parseJsonObject(body)
+      const sessionId = str(parsed, 'sessionId') ?? ''
+      const title = str(parsed, 'title')
+
+      if (sessionId === '' || title === null) {
+        sendJson(res, 400, { ok: false })
+
+        return
+      }
+
+      const name = meta.rename(sessionId, title)
+
+      store.setName(sessionId, name)
+      scheduleSnapshot()
+      sendJson(res, 200, { ok: true, name })
+
+      return
+    }
+
+    // Puts ended sessions away (or brings them back); open ones stay listed.
+    if (req.method === 'POST' && url.pathname === '/api/sessions/archive') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const parsed = body === null ? null : parseJsonObject(body)
+      const ended: string[] = []
+
+      for (const sessionId of strings(arr(parsed, 'sessionIds'))) {
+        const open = store.sessions.get(sessionId)
+
+        if (open === undefined || open.status === 'ended') ended.push(sessionId)
+      }
+
+      sendJson(res, 200, { ok: true, changed: meta.setArchived(ended, bool(parsed, 'archived') ?? true) })
+
+      return
+    }
+
+    // Asks Claude Code to close the session, the same as typing /exit there.
+    if (req.method === 'POST' && url.pathname === '/api/sessions/end') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const sessionId = str(body === null ? null : parseJsonObject(body), 'sessionId') ?? ''
+      const session = store.sessions.get(sessionId)
+
+      if (session === undefined || session.status === 'ended') {
+        sendJson(res, 404, { ok: false, error: 'not open' })
+
+        return
+      }
+
+      const result = store.queueCommand(sessionId, 'exit', '')
+
+      if (result !== 'queued') {
+        sendJson(res, 409, { ok: false, error: result })
+
+        return
+      }
+
+      log(`asked ${sessionId} to end`)
+      scheduleSnapshot()
+      sendJson(res, 200, { ok: true })
+
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/tailnet/bridges') {
+      sendJson(res, 200, { bridges: await discover() })
+
+      return
+    }
+
+    // Only this PC's own code decides whether its tailnet is trusted.
+    if (req.method === 'POST' && url.pathname === '/api/tailnet/trust') {
+      if (caller.device !== null) {
+        sendJson(res, 403, { ok: false, error: 'owner only' })
+
+        return
+      }
+
+      const body = await readBody(req, API_BODY_LIMIT)
+      const on = bool(body === null ? null : parseJsonObject(body), 'on') ?? false
+
+      config.trustTailnet = on
+
+      // Turning it off cuts every device that came in through it.
+      if (!on) {
+        for (const device of config.devices) {
+          if (device.tailnet !== null) dropDevice(device.id)
+        }
+        config.devices = config.devices.filter(device => device.tailnet === null)
+      }
+
+      options.saveConfig(config)
+      log(`tailnet trust ${on ? 'on' : 'off'}`)
+      scheduleSnapshot()
+      sendJson(res, 200, { ok: true, trustTailnet: on })
 
       return
     }
@@ -1030,7 +1251,13 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     }
 
     if (url.pathname === '/api/health') {
-      sendJson(res, 200, { ok: true, name: 'choibuddy', version: VERSION, pid: process.pid })
+      sendJson(res, 200, { ok: true, name: 'choibuddy', version: VERSION, pid: process.pid, pcId: config.pcId, trustTailnet: config.trustTailnet })
+
+      return
+    }
+
+    if (url.pathname === '/api/tailnet/claim') {
+      handleClaim(req, res, loopbackListener).catch(done)
 
       return
     }

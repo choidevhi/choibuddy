@@ -9,7 +9,7 @@ import { Gallery } from '../src/gallery.ts'
 import { editPreview } from '../src/previews.ts'
 import { type HookInput, parseHookInput, Store } from '../src/store.ts'
 
-const SERVER = { pcId: 'pc-1', hostName: 'pc', tailnetUrl: null, version: 'test', autoAcceptUntil: 0 }
+const SERVER = { pcId: 'pc-1', hostName: 'pc', tailnetUrl: null, version: 'test', autoAcceptUntil: 0, trustTailnet: false }
 
 function makeStore(files: Record<string, string> = {}): { store: Store; tick: (ms: number) => void } {
   let now = 1_000

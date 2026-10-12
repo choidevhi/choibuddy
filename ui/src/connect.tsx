@@ -6,7 +6,7 @@ import { showToast } from './confirm.tsx'
 import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
 import { ago, duration, isLang, type Lang, LANGS, type MessageKey, type Translate, useI18n } from './i18n.ts'
 import { CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
-import { createDevice, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, type SetupStatus } from './live.ts'
+import { createDevice, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, setTrustTailnet, type SetupStatus } from './live.ts'
 import { parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
@@ -388,10 +388,65 @@ const AUTO_CHOICES = [
 // Further out than this means "until turned off".
 const FOREVER_MS = 365 * 24 * 60 * 60_000
 
+// This PC only: whether the person's own Tailscale devices connect without a
+// code. Turning it on goes through a confirmation like Auto Accept.
+function TrustTailnet({ feed }: { feed: Feed }) {
+  const { t } = useI18n()
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const on = feed.snapshot?.server.trustTailnet === true
+
+  useBackLayer(asking, () => setAsking(false))
+
+  const apply = async (next: boolean): Promise<void> => {
+    setBusy(true)
+
+    const ok = await setTrustTailnet(feed.connection, next)
+
+    setBusy(false)
+    setAsking(false)
+    if (!ok) showToast(t('chat.actionFailed'))
+  }
+
+  return (
+    <div className="danger-pc">
+      <div className="row">
+        <span className="row-text">
+          <span className="danger-name">{t('danger.trust')}</span>
+          <span className={`row-hint ${on ? 'bad' : ''}`}>{on ? t('danger.trustOn') : t('danger.trustHint')}</span>
+        </span>
+        {on ? (
+          <button type="button" className="btn small btn--deny" disabled={busy} onClick={() => void apply(false)}>
+            {t('danger.trustDisable')}
+          </button>
+        ) : (
+          <button type="button" className={`btn small ${asking ? 'danger-picked' : ''}`} disabled={busy || feed.snapshot === null} onClick={() => setAsking(true)}>
+            {t('danger.trustEnable')}
+          </button>
+        )}
+      </div>
+      {asking && !on && (
+        <div className="danger-confirm" role="alertdialog" aria-label={t('danger.trust')}>
+          <strong>{t('danger.trustAsk')}</strong>
+          <span className="btn-row">
+            <button type="button" className="btn small" onClick={() => setAsking(false)}>
+              {t('danger.cancel')}
+            </button>
+            <button type="button" className="btn small btn--danger" disabled={busy} onClick={() => void apply(true)}>
+              {t('danger.trustEnable')}
+            </button>
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Auto Accept per PC. Turning it on always goes through an in-app
 // confirmation that spells out what it does.
 function DangerZone({ feeds, now }: { feeds: Feed[]; now: number }) {
   const { t } = useI18n()
+  const local = feeds.find(feed => feed.local)
   const [asking, setAsking] = useState<{ key: string; minutes: number } | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -464,6 +519,7 @@ function DangerZone({ feeds, now }: { feeds: Feed[]; now: number }) {
           </div>
         )
       })}
+      {local !== undefined && <TrustTailnet feed={local} />}
     </div>
   )
 }

@@ -4,7 +4,7 @@ mod float;
 mod tailscale;
 
 use float::FloatState;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewWindow, Window, WindowEvent, Wry};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
@@ -136,6 +136,49 @@ fn reset_float(app: AppHandle) {
     float::reset(&app);
 }
 
+/// The floating buddy's menu texts, in the app's language.
+#[derive(serde::Deserialize)]
+struct FloatMenuTexts {
+    open: String,
+    sound: String,
+    reset: String,
+    hide: String,
+    quit: String,
+}
+
+/// The floating buddy's right-click menu, shown at the pointer instead of the
+/// WebView's own (Save image as…). Opening, moving back and quitting happen
+/// here; hiding and sound go back to the buddy as a "float-menu" event,
+/// since its settings live in the page.
+#[tauri::command]
+fn float_menu(app: AppHandle, window: Window, texts: FloatMenuTexts) -> Result<(), String> {
+    let item = |id: &str, text: String| MenuItem::with_id(&app, id, text, true, None::<&str>).map_err(|error| error.to_string());
+    let open = item("float_open", texts.open)?;
+    let sound = item("float_sound", texts.sound)?;
+    let reset = item("float_reset", texts.reset)?;
+    let hide = item("float_hide", texts.hide)?;
+    let quit = item("float_quit", texts.quit)?;
+    let line = PredefinedMenuItem::separator(&app).map_err(|error| error.to_string())?;
+    let menu = Menu::with_items(&app, &[&open, &sound, &reset, &hide, &line, &quit]).map_err(|error| error.to_string())?;
+
+    window.popup_menu(&menu).map_err(|error| error.to_string())
+}
+
+fn on_float_menu(app: &AppHandle, id: &str) {
+    match id {
+        "float_open" => show(app),
+        "float_reset" => float::reset(app),
+        "float_quit" => app.exit(0),
+        "float_hide" => {
+            let _ = app.emit_to("float", "float-menu", "hide");
+        }
+        "float_sound" => {
+            let _ = app.emit_to("float", "float-menu", "sound");
+        }
+        _ => {}
+    }
+}
+
 struct TrayItems {
     open: MenuItem<Wry>,
     float: MenuItem<Wry>,
@@ -191,6 +234,7 @@ pub fn run() {
             set_float,
             float_layout,
             reset_float,
+            float_menu,
             set_tray_texts,
             autostart_enabled,
             set_autostart,
@@ -251,6 +295,7 @@ pub fn run() {
             }
 
             tray.build(app)?;
+            app.on_menu_event(|app, event| on_float_menu(app, event.id.as_ref()));
 
             // Started by Windows at sign-in: stay in the tray, keep the bridge up.
             if !std::env::args().any(|arg| arg == "--hidden") {

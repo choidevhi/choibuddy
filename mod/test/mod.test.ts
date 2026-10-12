@@ -1,6 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import { browserText, commandsOf, joinPrompts, promptsOf } from '../hooks/register.ts'
+import { browserText, commandsOf, joinPrompts, needsCommands, promptsOf } from '../hooks/register.ts'
 
 const NOW = Date.parse('2026-10-11T10:00:00Z')
 
@@ -8,7 +8,7 @@ type Sent = { url: string; body: string }
 
 // Stands in for the engine and the bridge: records what the mod posts and
 // answers polls with `queue` (and `commands`) once.
-function engineBeneath(on: On, sent: Sent[], submitted: string[], queue: string[], commands: string[] = [], ran: string[] = [], mode = 'steer'): void {
+function engineBeneath(on: On, sent: Sent[], submitted: string[], queue: string[], commands: string[] = [], ran: string[] = [], mode = 'steer', needCommands = false): void {
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.usage', () => ({
     value: { startedAt: NOW, context: { window: 200_000, tokens: 20_000, percent: 10 }, rateLimits: [] },
@@ -22,7 +22,7 @@ function engineBeneath(on: On, sent: Sent[], submitted: string[], queue: string[
     const prompts = isPoll ? queue.splice(0).map(text => ({ id: text, text, mode })) : []
     const queued = isPoll ? commands.splice(0).map(line => ({ id: `c-${line}`, command: line.split(' ')[0], args: line.split(' ').slice(1).join(' ') })) : []
 
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, prompts, commands: queued }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, prompts, commands: queued, needCommands: isPoll && needCommands }) } }
   })
   on('command.list', () => ({ value: [{ name: 'effort', description: 'Set effort', source: 'builtin' }] }))
   on('command.run', (_, e) => {
@@ -129,6 +129,24 @@ test('위젯에서 보낸 슬래시 명령을 실행하고 결과를 브리지�
   expect(result?.body).toContain('"id":"c-effort high"')
   expect(result?.body).toContain('"text":"ran effort"')
   expect(sent.some(item => item.url.endsWith('/mod/commands') && item.body.includes('"name":"effort"'))).toBe(true)
+})
+
+test('브리지가 명령 목록을 잃었다고 하면 다시 보낸다', async ($, on) => {
+  const sent: Sent[] = []
+  const clock = mock.clock(on, { now: NOW })
+
+  expect(needsCommands('{"needCommands":true}')).toBe(true)
+  expect(needsCommands('{"ok":true}')).toBe(false)
+  expect(needsCommands('nope')).toBe(false)
+
+  engineBeneath(on, sent, [], [], [], [], 'steer', true)
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+
+  const atStart = sent.filter(item => item.url.endsWith('/mod/commands')).length
+
+  await clock.advance(1600)
+
+  expect(sent.filter(item => item.url.endsWith('/mod/commands')).length).toBe(atStart + 1)
 })
 
 test('요청마다 모델과 effort가 바뀔 때만 알린다', async ($, on) => {

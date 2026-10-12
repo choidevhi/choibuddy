@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_PORT } from '../../shared/protocol.ts'
-import { arr, type JsonObject, num, objects, parseJsonObject, str } from './json.ts'
+import { arr, bool, type JsonObject, num, objects, parseJsonObject, str } from './json.ts'
 
 export const HOME_DIR = process.env.CHOIBUDDY_HOME ?? join(homedir(), '.choibuddy')
 
@@ -11,7 +11,7 @@ export const CONFIG_PATH = join(HOME_DIR, 'config.json')
 
 export const LOG_PATH = join(HOME_DIR, 'bridge.log')
 
-export const VERSION = '0.5.8'
+export const VERSION = '0.5.9'
 
 // A phone or another PC paired with this bridge. Only a hash of its code is
 // kept, and each one can be cut off on its own.
@@ -21,6 +21,9 @@ export type Device = {
   hash: string
   createdAt: number
   lastSeen: number | null
+  // The tailnet address of a device that connected by itself as one of the
+  // person's own (see trustTailnet); null for one paired with a code.
+  tailnet: string | null
 }
 
 export type Config = {
@@ -29,6 +32,9 @@ export type Config = {
   token: string
   pcId: string
   devices: Device[]
+  // The person's own Tailscale devices may connect without a code. Off
+  // unless turned on in the danger zone.
+  trustTailnet: boolean
 }
 
 export function hashToken(token: string): string {
@@ -55,7 +61,7 @@ function parseDevices(stored: JsonObject | null): Device[] {
     const hash = str(item, 'hash')
 
     if (id === null || hash === null) continue
-    devices.push({ id, name: str(item, 'name') ?? '', hash, createdAt: num(item, 'createdAt') ?? 0, lastSeen: num(item, 'lastSeen') })
+    devices.push({ id, name: str(item, 'name') ?? '', hash, createdAt: num(item, 'createdAt') ?? 0, lastSeen: num(item, 'lastSeen'), tailnet: str(item, 'tailnet') })
   }
 
   return devices
@@ -79,6 +85,7 @@ export function loadConfig(): Config {
     token: token !== null && token.length >= 32 ? token : newToken(),
     pcId: pcId ?? randomBytes(6).toString('hex'),
     devices: parseDevices(stored),
+    trustTailnet: bool(stored, 'trustTailnet') ?? false,
   }
 
   if (config.token !== token || pcId === null) saveConfig(config)

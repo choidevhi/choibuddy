@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Alert, type BrowserRequest, type CommandInfo, type Decision, PROMPT_MODES, type PromptMode, type Session } from '../../shared/protocol.ts'
 import { answerBrowserRequest, BrowserTab } from './browser.tsx'
 import { type Feed, feedFor, loadSources, merge, type PcSession, type Source, useFeeds } from './feeds.ts'
+import { useTailnetAutoConnect } from './autoconnect.ts'
 import { closeTopLayer } from './back.ts'
 import { Buddy, lookFor, type Tone } from './buddy.tsx'
 import { Chat } from './chat.tsx'
@@ -283,6 +284,8 @@ export function App() {
   )
 
   const feeds = useFeeds(sources, onAlert, onBrowserRequest)
+
+  useTailnetAutoConnect(feeds, name => setToast(t('toast.autoConnected', { name })))
   const merged = useMemo(() => merge(feeds), [feeds])
   const sessions = merged.sessions
   const ordered = useMemo(() => [...sessions].sort((a, b) => a.startedAt - b.startedAt), [sessions])

@@ -90,6 +90,8 @@ export const windowsShell = {
   floatLayout: (width: number, height: number): Promise<void> => invoke('float_layout', { width, height }),
   resetFloat: (): Promise<void> => invoke('reset_float'),
   setTrayTexts: (open: string, float: string, reset: string, quit: string): Promise<void> => invoke('set_tray_texts', { open, float, reset, quit }),
+  // The floating buddy's right-click menu, in the app's language.
+  floatMenu: (texts: { open: string; sound: string; reset: string; hide: string; quit: string }): Promise<void> => invoke('float_menu', { texts }),
 }
 
 export function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {

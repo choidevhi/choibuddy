@@ -11,7 +11,7 @@ import { parseHookInput, parseSlash, Store } from '../src/store.ts'
 import { Transcripts } from '../src/transcripts.ts'
 
 const TOKEN = 'test-token-0123456789abcdefghijklmnop'
-const SERVER = { pcId: 'pc-1', hostName: 'pc', tailnetUrl: null, version: 'test', autoAcceptUntil: 0 }
+const SERVER = { pcId: 'pc-1', hostName: 'pc', tailnetUrl: null, version: 'test', autoAcceptUntil: 0, trustTailnet: false }
 
 function makeStore(): Store {
   let id = 0
@@ -164,7 +164,7 @@ async function withBridge(body: (bridge: Bridge, base: string, claudeDir: string
   const claudeDir = mkdtempSync(join(tmpdir(), 'choibuddy-claude-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'choibuddy-uploads-'))
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [] },
+    config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [], trustTailnet: false },
     saveConfig: () => {},
     galleryDir: mkdtempSync(join(tmpdir(), 'choibuddy-gallery-')),
     uploadsDir,

@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event'
 import { cursorPosition, getCurrentWindow } from '@tauri-apps/api/window'
 import { type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Alert, Limits, Pending, Session } from '../../shared/protocol.ts'
@@ -9,7 +10,7 @@ import { CheckIcon, XIcon } from './icons.tsx'
 import { sendDecision } from './live.ts'
 import { effortLabel, modelLabel } from './model.tsx'
 import { KIND_LABEL, PendingHeadline } from './pending.tsx'
-import { type Connection, windowsShell } from './platform.ts'
+import { type Connection, readPref, windowsShell } from './platform.ts'
 import { ON_OFF, usePref } from './prefs.ts'
 import { playChime } from './sound.ts'
 import { gauges } from './usage.tsx'
@@ -166,7 +167,7 @@ export function FloatApp() {
   const { theme, lang, sources } = useShell()
   const t = useMemo(() => translator(lang), [lang])
   const now = useNow()
-  const [sound] = usePref('sound', ON_OFF, 'on')
+  const [sound, setSound] = usePref('sound', ON_OFF, 'on')
   const [progressBubbles] = usePref('progressBubbles', ON_OFF, 'on')
   const [doneBubbles] = usePref('doneBubbles', ON_OFF, 'on')
   const [, setFloatPref] = usePref('float', ON_OFF, 'on')
@@ -257,7 +258,34 @@ export function FloatApp() {
 
   useEffect(() => {
     document.documentElement.classList.add('is-float')
+
+    // No WebView menu (Back, Save as…) anywhere on the buddy's window.
+    const block = (event: MouseEvent): void => event.preventDefault()
+
+    document.addEventListener('contextmenu', block)
+
+    return () => document.removeEventListener('contextmenu', block)
   }, [])
+
+  // What the buddy's own menu sends back; opening, moving and quitting are done by the shell.
+  useEffect(() => {
+    const unlisten = listen<string>('float-menu', event => {
+      if (event.payload === 'hide') hideFloat()
+      if (event.payload === 'sound') setSound(readPref('sound', ON_OFF, 'on') === 'on' ? 'off' : 'on')
+    })
+
+    return () => void unlisten.then(stop => stop())
+  }, [])
+
+  const openMenu = (): void => {
+    void windowsShell.floatMenu({
+      open: t('float.menuOpen'),
+      sound: sound === 'on' ? t('float.menuSoundOff') : t('float.menuSoundOn'),
+      reset: t('float.menuReset'),
+      hide: t('float.menuHide'),
+      quit: t('float.menuQuit'),
+    })
+  }
 
   const onAlert = useCallback(
     (alert: Alert) => {
@@ -348,7 +376,7 @@ export function FloatApp() {
               </span>
             )
           })}
-          <div className="float-hit" ref={hit} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
+          <div className="float-hit" ref={hit} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onContextMenu={openMenu}>
             <button
               type="button"
               className={`float-buddy ${firstPending !== undefined ? 'alert' : ''}`}

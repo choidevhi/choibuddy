@@ -22,6 +22,8 @@ type Props<T extends string> = {
   title?: string
   className?: string
   disabled?: boolean
+  // A right click, or a long press on a phone, on one of the rows.
+  onOptionMenu?: (value: T, at: { x: number; y: number }) => void
 }
 
 // Phones get a sheet from the bottom; wider screens a list under the button.
@@ -32,7 +34,7 @@ type Place = { top: number; left: number; width: number; maxHeight: number; abov
 
 // The app's own drop-down, used instead of <select>: the platform's picker
 // (Android's radio dialog in particular) looks foreign in the app.
-export function Picker<T extends string>({ value, options, onChange, placeholder = '', title, className = '', disabled = false }: Props<T>) {
+export function Picker<T extends string>({ value, options, onChange, placeholder = '', title, className = '', disabled = false, onOptionMenu }: Props<T>) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const [place, setPlace] = useState<Place | null>(null)
@@ -146,6 +148,12 @@ export function Picker<T extends string>({ value, options, onChange, placeholder
             className={`picker-row ${row.index === active ? 'active' : ''} ${row.option.value === value ? 'chosen' : ''}`}
             onPointerEnter={() => setActive(row.index)}
             onClick={() => choose(row.option)}
+            onContextMenu={event => {
+              if (onOptionMenu === undefined) return
+              event.preventDefault()
+              setOpen(false)
+              onOptionMenu(row.option.value, { x: event.clientX, y: event.clientY })
+            }}
           >
             {row.option.dot !== undefined && <span className={`status-dot ${row.option.dot}`} />}
             <span className="picker-row-text">
