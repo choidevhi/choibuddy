@@ -285,10 +285,13 @@ pub fn run() {
                 window.set_resizable(true)?;
             }
 
-            let open = MenuItem::with_id(app, "open", "열기", true, None::<&str>)?;
-            let float_on = MenuItem::with_id(app, "show_float", "플로팅 버디 켜기", true, None::<&str>)?;
-            let reset = MenuItem::with_id(app, "reset_float", "버디 위치 초기화", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
+            // Menu events reach every menu handler in the app (the buddy's menu
+            // too, and on macOS the menu bar), so each menu's ids carry its own
+            // prefix: plain words like "quit" or "open" would clash.
+            let open = MenuItem::with_id(app, "tray_open", "열기", true, None::<&str>)?;
+            let float_on = MenuItem::with_id(app, "tray_float_on", "플로팅 버디 켜기", true, None::<&str>)?;
+            let reset = MenuItem::with_id(app, "tray_float_reset", "버디 위치 초기화", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "tray_quit", "종료", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &float_on, &reset, &quit])?;
 
             app.manage(TrayItems { open: open.clone(), float: float_on.clone(), reset: reset.clone(), quit: quit.clone() });
@@ -297,14 +300,14 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => show(app),
+                    "tray_open" => show(app),
                     // The buddy turned itself off; the app's setting follows this event.
-                    "show_float" => {
+                    "tray_float_on" => {
                         let _ = set_float(app.clone(), true);
                         let _ = app.emit_to("main", "tray-float-on", ());
                     }
-                    "reset_float" => float::reset(app),
-                    "quit" => app.exit(0),
+                    "tray_float_reset" => float::reset(app),
+                    "tray_quit" => app.exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {

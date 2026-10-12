@@ -41,6 +41,8 @@ const LAST_SEEN_SAVE_MS = 60_000
 const BROWSER_WAIT_MS = 15_000
 // How long Codex's answer on whether it trusts the hooks is kept.
 const CODEX_CHECK_MS = 60_000
+// An upload left in a prompt box this long is forgotten (the file stays).
+const UPLOAD_WAIT_MS = 7 * 24 * 60 * 60_000
 // How often the installed mod's version is read again.
 const MOD_CHECK_MS = 30_000
 // Claude Code's own commands that run as commands even before a session has
@@ -372,6 +374,21 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const trashDir = options.trashDir ?? join(options.uploadsDir, '..', 'trash')
   // In memory only: a restarted bridge always starts with this off.
   let autoAcceptUntil = 0
+  // Uploads still in a prompt box: path → the session they were made for.
+  const waitingUploads = new Map<string, { sessionId: string; at: number }>()
+
+  // The prompt went out: the pictures it lists join the gallery now.
+  const sendUploads = (sessionId: string, text: string): void => {
+    const session = store.sessions.get(sessionId)
+
+    for (const [path, upload] of waitingUploads) {
+      if (now() - upload.at > UPLOAD_WAIT_MS) waitingUploads.delete(path)
+      else if (upload.sessionId === sessionId && text.includes(path)) {
+        waitingUploads.delete(path)
+        if (session !== undefined) gallery.addFile({ sessionId, sessionName: session.name, tool: 'upload' }, path)
+      }
+    }
+  }
   const autoLanguage = new AutoLanguage()
   // First prompts for sessions opened from a device, waiting for them to start.
   const launchPrompts: LaunchPrompt[] = []
@@ -907,9 +924,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       writeFileSync(path, bytes)
 
       const sessionId = url.searchParams.get('session') ?? ''
-      const session = store.sessions.get(sessionId)
 
-      if (session !== undefined) gallery.addFile({ sessionId, sessionName: session.name, tool: 'upload' }, path)
+      // A picture joins the gallery once the prompt that lists it is sent,
+      // not while it waits in the prompt box.
+      if (store.sessions.has(sessionId)) waitingUploads.set(path, { sessionId, at: now() })
       log(`upload ${bytes.length} bytes`)
       scheduleSnapshot()
       sendJson(res, 200, { ok: true, path, name, size: bytes.length })
@@ -1102,6 +1120,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const mode: PromptMode = PROMPT_MODES.find(item => item === requested) ?? 'steer'
       const result = slash !== null && known ? store.queueCommand(sessionId, slash.command, slash.args) : store.queuePrompt(sessionId, text, mode)
 
+      if (result === 'queued') sendUploads(sessionId, text)
       log(`${known ? 'command' : 'prompt'} for ${sessionId}: ${result}`)
       scheduleSnapshot()
       sendJson(res, result === 'queued' ? 200 : 409, { ok: result === 'queued', result })

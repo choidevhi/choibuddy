@@ -4154,3 +4154,50 @@ body.resizing--column {
   letter-spacing: 0.02em;
   vertical-align: 1px;
 }
+
+/* Files sent with a prompt, inside its bubble; pictures in the prompt box */
+
+.bubble-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.bubble-files:first-child {
+  margin-top: 0;
+}
+
+.bubble-file-picture {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.15);
+  cursor: zoom-in;
+}
+
+.bubble-file-picture img {
+  display: block;
+  max-width: 220px;
+  max-height: 180px;
+  object-fit: cover;
+}
+
+.bubble-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+}
+
+.chip-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: cover;
+}

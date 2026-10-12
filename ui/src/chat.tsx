@@ -10,6 +10,7 @@ import { ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon,
 import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
 import { deleteConversation, fetchConversation, fetchGallery, reloadPlugins, type Uploaded } from './live.ts'
+import { attachedName, attachmentNote, splitAttachments } from './attachments.ts'
 import { Markdown } from './markdown.tsx'
 import { arrived, type OutPrompt, outPrompt, type Queued, syncOutbox } from './outbox.ts'
 import { type PcEntry, useSessionNav } from './sessions.tsx'
@@ -83,6 +84,8 @@ type Attachment = {
   name: string
   path: string | null
   failed: boolean
+  // A picture's own pixels while it is in the box (not kept with the draft).
+  preview: string | null
 }
 
 type ComposerProps = {
@@ -97,12 +100,6 @@ type ComposerProps = {
   onSent?: (text: string, mode: PromptMode | null) => void
 }
 
-// Claude Code takes no files from a plugin's prompt, so attachments are
-// uploaded to the session's PC and the prompt lists their paths for Claude
-// to open.
-export function attachmentNote(paths: string[]): string {
-  return paths.length === 0 ? '' : `\n\nAttached files (open them with the Read tool):\n${paths.map(path => `- ${path}`).join('\n')}`
-}
 
 // Commands whose name starts with what was typed come first, then the ones
 // that merely contain it.
@@ -176,7 +173,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
   // The box belongs to the session: its words and finished uploads come back with it.
   useEffect(() => {
     const stored = sessionId === null ? null : readDraft(sessionId)
-    const list = (stored?.files ?? []).map(file => ({ key: crypto.randomUUID(), name: file.name, path: file.path, failed: false }))
+    const list = (stored?.files ?? []).map((file): Attachment => ({ key: crypto.randomUUID(), name: file.name, path: file.path, failed: false, preview: null }))
 
     held.current = { sessionId, text: stored?.text ?? '', files: list }
     setDraft(stored?.text ?? '')
@@ -204,7 +201,9 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
       const key = crypto.randomUUID()
       const owner = held.current.sessionId
 
-      changeFiles([...held.current.files, { key, name: file.name === '' ? 'pasted.png' : file.name, path: null, failed: false }])
+      const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+
+      changeFiles([...held.current.files, { key, name: file.name === '' ? 'pasted.png' : file.name, path: null, failed: false, preview }])
       void onUpload(session.id, file).then(result => {
         // The box moved on to another session meanwhile.
         if (held.current.sessionId !== owner) return
@@ -245,6 +244,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
     if (ok && held.current.sessionId !== owner) saveDraft(owner, '', [])
 
     if (ok && held.current.sessionId === owner) {
+      for (const file of held.current.files) if (file.preview !== null) URL.revokeObjectURL(file.preview)
       setDraft('')
       setFiles([])
       keep('', [])
@@ -341,9 +341,24 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
         <div className="attachments">
           {files.map(file => (
             <span key={file.key} className={`chip ${file.failed ? 'chip--failed' : ''}`} title={file.failed ? t('chat.uploadFailed', { name: file.name }) : (file.path ?? file.name)}>
-              {file.path === null && !file.failed ? <SpinnerIcon size={12} /> : <PaperclipIcon size={12} />}
+              {file.preview !== null ? (
+                <img className="chip-thumb" src={file.preview} alt="" />
+              ) : file.path === null && !file.failed ? (
+                <SpinnerIcon size={12} />
+              ) : (
+                <PaperclipIcon size={12} />
+              )}
               <span className="chip-name">{file.name}</span>
-              <button type="button" className="chip-remove" onClick={() => changeFiles(held.current.files.filter(item => item.key !== file.key))} aria-label="×">
+              {file.preview !== null && file.path === null && !file.failed && <SpinnerIcon size={12} />}
+              <button
+                type="button"
+                className="chip-remove"
+                onClick={() => {
+                  if (file.preview !== null) URL.revokeObjectURL(file.preview)
+                  changeFiles(held.current.files.filter(item => item.key !== file.key))
+                }}
+                aria-label="×"
+              >
                 <XIcon size={11} />
               </button>
             </span>
@@ -620,6 +635,35 @@ function ConversationPane(props: PaneProps) {
   const reloading = live?.queued.some(item => item.mode === 'command' && item.text === '/reload-plugins') === true
   const status = live?.status ?? 'ended'
 
+  // A prompt's words, then the files sent with it: pictures (open in the
+  // viewer) or file names. The list Claude reads stays out of sight.
+  const promptBody = (text: string) => {
+    const { body, paths } = splitAttachments(text)
+
+    return (
+      <>
+        {body !== '' && <Markdown text={body} />}
+        {paths.length > 0 && (
+          <div className="bubble-files">
+            {paths.map(path => {
+              const image = pictures.find(picture => picture.path === path)
+
+              return image === undefined ? (
+                <span className="bubble-file" key={path} title={path}>
+                  <PaperclipIcon size={12} /> {attachedName(path)}
+                </span>
+              ) : (
+                <button type="button" className="bubble-file-picture" key={path} onClick={() => setViewing(image)} title={attachedName(path)}>
+                  <RemoteImage connection={feed?.connection ?? null} id={image.id} alt={attachedName(path)} lazy />
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </>
+    )
+  }
+
   const messageBubble = (message: ChatMessage) =>
     message.role === 'note' ? (
       <div className="chat-note" key={message.id}>
@@ -627,7 +671,7 @@ function ConversationPane(props: PaneProps) {
       </div>
     ) : message.role === 'user' ? (
       <div className="bubble bubble--me" key={message.id}>
-        <Markdown text={message.text} />
+        {promptBody(message.text)}
       </div>
     ) : (
       <div className="bubble-row" key={message.id}>
@@ -743,7 +787,12 @@ function ConversationPane(props: PaneProps) {
                 {t('chat.loadOlder')}
               </button>
             )}
-            {withPictures(shown.messages, pictures, shown.start === 0).map(item =>
+            {withPictures(
+              shown.messages,
+              // Pictures sent with a prompt show inside its bubble.
+              pictures.filter(picture => picture.tool !== 'upload'),
+              shown.start === 0,
+            ).map(item =>
               'image' in item ? (
                 pictureBubble(item.image)
               ) : (
@@ -756,7 +805,7 @@ function ConversationPane(props: PaneProps) {
                 : [
                     <div className={`bubble bubble--me bubble--out ${item.leftAt === null ? 'bubble--queued' : ''}`} key={item.key}>
                       {item.leftAt === null && working && item.mode !== null && <span className="queued-tag">{t(QUEUED_LABEL[item.mode])}</span>}
-                      <Markdown text={item.text} />
+                      {promptBody(item.text)}
                     </div>,
                   ],
             )}

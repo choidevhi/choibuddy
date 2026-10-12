@@ -370,3 +370,27 @@ test('the mod reports the version its manifest has', () => {
 
   assert.ok(version !== null && source.includes(`const MOD_VERSION = '${version}'`), `MOD_VERSION should be ${version}`)
 })
+
+test('a pasted picture joins the gallery when its prompt is sent, not while it waits in the box', async () => {
+  await withBridge({}, async ({ url }) => {
+    const pictures = async (): Promise<JsonObject[]> => objects(arr((await api(url, '/api/gallery')).json, 'images'))
+
+    await hook(url, { hook_event_name: 'SessionStart', session_id: 's1', source: 'startup' })
+    await api(url, '/mod/poll', { sessionId: 's1' }, {})
+
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+    const uploaded = parseJsonObject(await (await fetch(`${url}/api/upload?session=s1&name=pasted.png`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: png })).text())
+    const path = str(uploaded, 'path') ?? ''
+
+    assert.notEqual(path, '')
+    assert.deepEqual(await pictures(), [])
+
+    await api(url, '/api/prompt', { sessionId: 's1', text: `이거 봐줘\n\nAttached files (open them with the Read tool):\n- ${path}` })
+
+    const after = await pictures()
+
+    assert.equal(after.length, 1)
+    assert.equal(str(after[0] ?? {}, 'tool'), 'upload')
+    assert.equal(str(after[0] ?? {}, 'path'), path)
+  })
+})
