@@ -341,3 +341,30 @@ test('a quiet session stays while its mod polls and goes once the mod stops', ()
   tick(11_000)
   assert.deepEqual(store.prune(), ['sess-1'])
 })
+
+test('a command an idle session never answers leaves the queue as failed', () => {
+  const { store, tick } = makeStore()
+
+  store.apply(hook('SessionStart', { source: 'startup' }))
+  store.takePrompts('sess-1')
+  store.queueCommand('sess-1', 'reload-plugins', '')
+  assert.equal(store.takeCommands('sess-1').length, 1)
+
+  // Still waiting: not long enough yet.
+  tick(30_000)
+  store.takePrompts('sess-1')
+  assert.equal(store.expireCommands(), false)
+
+  // Idle the whole time and no answer: the mod could not run it.
+  tick(30_000)
+  store.takePrompts('sess-1')
+  assert.equal(store.expireCommands(), true)
+
+  const session = store.snapshot(SERVER).sessions[0]
+
+  assert.deepEqual(session?.queued, [])
+  assert.deepEqual(
+    session?.commandLog.map(entry => [entry.command, entry.failed, entry.text]),
+    [['reload-plugins', true, '']],
+  )
+})

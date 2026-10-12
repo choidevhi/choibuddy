@@ -12,7 +12,7 @@ export const CONFIG_PATH = join(HOME_DIR, 'config.json')
 
 export const LOG_PATH = join(HOME_DIR, 'bridge.log')
 
-export const VERSION = '0.6.9'
+export const VERSION = '0.7.0'
 
 // A phone or another PC paired with this bridge. Only a hash of its code is
 // kept, and each one can be cut off on its own.
@@ -38,6 +38,9 @@ export type Config = {
   trustTailnet: boolean
   // Replies in another language are asked again in this one; null: off.
   autoLanguage: Lang | null
+  // Paired devices may open and type into this PC's terminals (the PC's own
+  // app always may). Off unless turned on in the danger zone.
+  remoteTerminal: boolean
 }
 
 export function hashToken(token: string): string {
@@ -90,6 +93,7 @@ export function loadConfig(): Config {
     devices: parseDevices(stored),
     trustTailnet: bool(stored, 'trustTailnet') ?? false,
     autoLanguage: parseLang(str(stored, 'autoLanguage')),
+    remoteTerminal: bool(stored, 'remoteTerminal') ?? false,
   }
 
   if (config.token !== token || pcId === null) saveConfig(config)

@@ -29,13 +29,13 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 - **Panes like tmux.** On a PC, split home or chat into up to 6 panes, left/right or top/bottom, and split a half again. Drag the lines to resize; the layout is remembered. A home pane follows whichever session is busy until you pick one for it.
 - **Chat.** Whole conversations come from the session transcripts, with the pictures Claude opened and the ones you sent shown where they happened, live. Send prompts and attach files (from the home screen too): pictures show as thumbnails in the prompt box and inside your bubble once sent, never as a list of paths. A prompt you send stays one bubble, dimmed while it waits in the queue, until the transcript has it, so nothing blinks. Each session keeps its own unsent draft and attachments, so you can switch sessions and come back to it.
 - **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), reload its plugins (`/reload-plugins`), open a terminal in its folder, archive it or delete it. Ended sessions can be folded away, or archived or deleted all at once.
-- **Older mod, one tap.** A session started before the companion mod was updated says so in the chat, with a button that runs `/reload-plugins` there as soon as the session is idle.
-- **Terminal.** The terminal button above the session list opens a terminal on that PC (WezTerm, Windows Terminal or cmd), even when you press it on the phone.
+- **Older mod, one tap.** A session started before the companion mod was updated says so in the chat, with a button that runs `/reload-plugins` there as soon as the session is idle. A session whose mod is too old to take commands from the app never answers; after a while the chat says so and asks you to type `/reload-plugins` in its terminal once.
+- **Terminal, inside the app.** The terminal tab opens PowerShell on any of your PCs right in the app: what you type goes straight to the PC, output streams back live, and a screen that joins later (or another device) sees what came before. The phone gets Esc, Tab, Ctrl+C and arrow keys. The terminal button above the session list opens one in that session's folder.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
-- **Codex too (beta).** Press "Connect Codex" in the ＋ tab on a Windows PC and restart Codex. Without the `codex` command, ChoiBuddy installs OpenAI's Codex CLI first (winget). Then it adds its hooks and has Codex trust them, the same way Codex's own `/hooks` screen does. Codex sessions then show up with a tag: their steps (commands, patches), the conversation from Codex's own files, and its approval requests, which you can allow or deny from anywhere. Codex takes no prompts, slash commands or usage reports from outside, so those stay Claude Code only.
+- **Codex too (beta).** Press "Connect Codex" in the ＋ tab on a Windows PC and restart Codex. Without the `codex` command, ChoiBuddy installs OpenAI's Codex CLI first (winget). Then it adds its hooks and has Codex trust them, the same way Codex's own `/hooks` screen does. If that does not go through, a popup shows how to allow the hooks once in Codex, with a button that opens Codex in the app's terminal. Start Codex sessions from "New session" too. Codex sessions then show up with a tag: their steps (commands, patches), the conversation from Codex's own files, and its approval requests, which you can allow or deny from anywhere. Codex takes no prompts, slash commands or usage reports from outside, so those stay Claude Code only.
 - **Auto language.** Turn it on in settings and, when Claude answers in a language other than the app's, ChoiBuddy asks the session once to restate the answer in yours (never a restatement again). It applies to every connected PC.
-- **New sessions.** Pick a PC, a folder and a first prompt, and Claude Code opens in a new terminal on that PC.
+- **New sessions.** Pick a PC, Claude Code or Codex, a folder and a first prompt. It opens in the app's terminal, so you can type into it right away, or in a new window on the PC if you ask for that (or if this device may not use the PC's terminals). Codex runs with `--no-daemon` when it has that option: since 0.161 its shared background server fails to start for the winget and Codex app builds.
 
 ![A browser beside the session. Claude sees it too](promo/en/03-browser.png)
 
@@ -115,7 +115,10 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 - **Ending a session** and **reloading its plugins** send `/exit` and `/reload-plugins` through the companion mod, the same as typing them in the terminal.
 - **Codex.** ChoiBuddy writes its hooks to `~/.codex/hooks.json` only when you press "Connect Codex" on this PC (not from a phone), keeps your own hooks there, and saves the file before to `hooks.json.bak`. Codex runs only hooks it trusts: pressing the button also asks Codex's own app-server (`codex app-server`, `hooks/list` then `config/batchWrite`) to trust ChoiBuddy's hooks, as `/hooks` would, and nothing else. When an update changes the hooks, the bridge writes and trusts them again, only while connected. An approval answer to Codex is only allow or deny.
 - **Auto language** reads only the reply text Claude Code hands to its Stop hook, decides the language on the bridge (code, paths and links left out), and sends one prompt through the companion mod. Any connected device may turn it on or off. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
-- **New sessions and terminals.** A terminal opens only when the folder exists, and it starts without going through a shell (the program and its arguments are passed separately). A device with a code can open a terminal window on the PC, but cannot type into it.
+- **Terminals.** A terminal in the app runs whatever is typed into it, as you on that PC.
+  - The PC's own app can always use them. Phones and other PCs can only after you turn on **Terminals from other devices** in that PC's danger zone (off by default, PC app only). Turning it off, cutting a device off or replacing the codes closes their open terminal screens at once.
+  - A first prompt for Codex reaches it as one plain string: quotes (also typographic ones) and control characters can't break out into the shell.
+  - A new window on the PC opens only when the folder exists, and starts without going through a shell (the program and its arguments are passed separately). Codex gets no first prompt there.
 - **Built-in browser.** Pages get no access to the app's IPC; a page can only send the app the element you picked and its address. Claude's `browser_view` calls are answered by a connected ChoiBuddy app with its browser open (this PC's, or another PC's that has this one connected); the first answer counts. A device that may send prompts may show Claude a page too. An app whose browser is closed waits 3 seconds before saying so, so an open one answers first.
 
 ## Good to know
@@ -128,7 +131,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 
 | Folder | What is in it |
 | --- | --- |
-| `bridge/` | Node 24 server with no dependencies. It turns hooks into state and holds approval requests until someone answers |
+| `bridge/` | Node 24 server. It turns hooks into state and holds approval requests until someone answers. Its one dependency, node-pty, is only for the in-app terminal |
 | `shared/protocol.ts` | The data types the bridge and the screens share |
 | `ui/` | The screens (React). The Windows and Android apps use the same build |
 | `windows/src-tauri/` | The Windows widget (Tauri 2): frameless window, tray, always on top, start with Windows |
@@ -142,7 +145,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 corepack pnpm test         # bridge tests
 corepack pnpm typecheck    # bridge and screens
 corepack pnpm build        # screens (ui/dist)
-corepack pnpm tauri build  # Windows installer (first fetches Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256)
+corepack pnpm tauri build  # Windows installer (first fetches Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256, and copies node-pty beside it)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JDK 21 in JAVA_HOME

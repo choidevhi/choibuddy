@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { codexAnswer, codexCommand, codexConnected, ensureCodexCommand, findCodexCli, patchFiles, patchLines, withCodexHooks } from '../src/codex.ts'
+import { codexAnswer, codexCommand, codexConnected, codexLaunchArgs, ensureCodexCommand, findCodexCli, patchFiles, patchLines, withCodexHooks } from '../src/codex.ts'
 import { arr, type JsonObject, obj, objects, parseJsonObject, str } from '../src/json.ts'
 import { startBridge } from '../src/server.ts'
 
@@ -73,7 +73,7 @@ test('a Codex session shows its steps, asks through the hook script and reads it
   )
 
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
     saveConfig: () => {},
     galleryDir: join(root, 'gallery'),
     uploadsDir: join(root, 'uploads'),
@@ -95,6 +95,7 @@ test('a Codex session shows its steps, asks through the hook script and reads it
         return true
       },
       command: () => true,
+      launchArgs: () => ['--no-daemon'],
     },
   })
   const url = `http://127.0.0.1:${bridge.port}`
@@ -174,7 +175,7 @@ test('a Codex session shows its steps, asks through the hook script and reads it
 test('a bridge not told where Codex lives leaves Codex alone', async () => {
   const root = mkdtempSync(join(tmpdir(), 'choibuddy-nocodex-'))
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
     saveConfig: () => {},
     galleryDir: join(root, 'gallery'),
     uploadsDir: join(root, 'uploads'),
@@ -240,7 +241,7 @@ test('the hook command reads the same in PowerShell, cmd and bash', () => {
 test('Codex can run the hook through PowerShell and through cmd, as it does on Windows', { skip: process.platform !== 'win32' }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'choibuddy-shells-'))
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
     saveConfig: () => {},
     galleryDir: join(root, 'gallery'),
     uploadsDir: join(root, 'uploads'),
@@ -278,4 +279,17 @@ test('Codex can run the hook through PowerShell and through cmd, as it does on W
   } finally {
     await bridge.close()
   }
+})
+
+test('Codex starts with --no-daemon only when it has that option', { skip: process.platform !== 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-codex-flags-'))
+  const today = join(root, 'new codex.cmd')
+  const older = join(root, 'old.cmd')
+
+  writeFileSync(today, '@echo       --no-daemon\r\n')
+  writeFileSync(older, '@echo Usage: codex [OPTIONS]\r\n')
+
+  assert.deepEqual(codexLaunchArgs(today), ['--no-daemon'])
+  assert.deepEqual(codexLaunchArgs(older), [])
+  assert.deepEqual(codexLaunchArgs(join(root, 'missing.exe')), [])
 })

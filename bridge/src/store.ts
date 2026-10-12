@@ -95,7 +95,13 @@ type OutgoingCommand = {
   args: string
   at: number
   taken: boolean
+  // When the mod took it.
+  takenAt: number | null
 }
+
+// A command taken but unanswered this long, with the session idle the whole
+// time, is one the session's mod cannot run (one from before slash commands).
+const COMMAND_ANSWER_MS = 45_000
 
 const MAX_COMMAND_LOG = 6
 const COMMAND_TEXT_LIMIT = 6000
@@ -743,7 +749,7 @@ export class Store {
 
     const list = this.#commandsOut.get(sessionId) ?? []
 
-    list.push({ id: this.#deps.newId(), command, args, at: now, taken: false })
+    list.push({ id: this.#deps.newId(), command, args, at: now, taken: false, takenAt: null })
     this.#commandsOut.set(sessionId, list)
 
     return 'queued'
@@ -755,10 +761,32 @@ export class Store {
 
     for (const item of fresh) {
       item.taken = true
+      item.takenAt = this.#deps.now()
       handed.push({ id: item.id, command: item.command, args: item.args })
     }
 
     return handed
+  }
+
+  // Commands taken long ago by a session that sat idle since, never answered:
+  // its mod cannot run commands. They leave the queue as failed with no text,
+  // which the app explains. True when any went.
+  expireCommands(): boolean {
+    const now = this.#deps.now()
+    let changed = false
+
+    for (const [sessionId, list] of this.#commandsOut) {
+      const session = this.sessions.get(sessionId)
+      const busy = session !== undefined && (session.status === 'thinking' || session.status === 'working' || session.status === 'waiting')
+      const quiet = session !== undefined && now - session.updatedAt >= COMMAND_ANSWER_MS
+
+      for (const item of [...list]) {
+        if (item.takenAt === null || busy || !quiet || now - item.takenAt < COMMAND_ANSWER_MS) continue
+        changed = this.commandResult({ sessionId, id: item.id, command: item.command, args: item.args, text: '', failed: true }) || changed
+      }
+    }
+
+    return changed
   }
 
   // What a command printed, from the mod; it leaves the queue and joins the log.

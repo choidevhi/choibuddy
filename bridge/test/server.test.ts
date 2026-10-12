@@ -13,7 +13,7 @@ async function withBridge(holdMs: number, body: (bridge: Bridge, base: string, c
   const galleryDir = mkdtempSync(join(tmpdir(), 'choibuddy-gallery-'))
   const claudeDir = mkdtempSync(join(tmpdir(), 'choibuddy-claude-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'choibuddy-uploads-'))
-  const bridge = await startBridge({ config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [], trustTailnet: false, autoLanguage: null }, saveConfig: () => {}, galleryDir, uploadsDir, docBackupDir: join(claudeDir, 'backups'), claudeDir, log: () => {}, bindTailnet: false, holdMs, read: () => null })
+  const bridge = await startBridge({ config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false }, saveConfig: () => {}, galleryDir, uploadsDir, docBackupDir: join(claudeDir, 'backups'), claudeDir, log: () => {}, bindTailnet: false, holdMs, read: () => null })
 
   try {
     await body(bridge, `http://127.0.0.1:${bridge.port}`, claudeDir)

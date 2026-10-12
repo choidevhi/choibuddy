@@ -8,7 +8,8 @@
 // the running bridge, is turned on again after the restart.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,14 +72,62 @@ function copyNode(): string {
   return target
 }
 
+// The in-app terminal's native part (node-pty), beside the bridge in app/pty:
+// from the Windows app's resources, or from node_modules in a clone. The
+// same version stays in place, since a running bridge may have it loaded; a
+// new one replaces it, the old folder set aside first (a folder still in use
+// stays as it is, and still works).
+function copyPty(): boolean {
+  const target = join(APP_DIR, 'pty')
+  const out = join(target, 'node_modules', '@lydell')
+  const packaged = join(SOURCE_ROOT, 'runtime', 'pty', 'node_modules', '@lydell')
+  const from = existsSync(packaged) ? packaged : ptyInNodeModules()
+
+  for (const entry of readdirSync(APP_DIR)) {
+    if (entry.startsWith('pty.old-')) rmSync(join(APP_DIR, entry), { recursive: true, force: true })
+  }
+
+  if (from === null) return false
+  if (ptyVersion(out) !== null && ptyVersion(out) === ptyVersion(from)) return true
+
+  if (existsSync(target)) {
+    try {
+      renameSync(target, `${target}.old-${Date.now()}`)
+    } catch {
+      return ptyVersion(out) !== null
+    }
+  }
+
+  for (const name of ['node-pty', 'node-pty-win32-x64']) {
+    cpSync(realpathSync(join(from, name)), join(out, name), { recursive: true, filter: source => !source.endsWith('.pdb') })
+  }
+
+  return true
+}
+
+// The folder holding @lydell/node-pty and its platform package, in a clone.
+function ptyInNodeModules(): string | null {
+  try {
+    return dirname(realpathSync(dirname(createRequire(join(SOURCE_ROOT, 'package.json')).resolve('@lydell/node-pty'))))
+  } catch {
+    return null
+  }
+}
+
+function ptyVersion(scope: string): string | null {
+  const manifest = join(scope, 'node-pty-win32-x64', 'package.json')
+
+  return existsSync(manifest) ? str(parseJsonObject(readFileSync(manifest, 'utf8')), 'version') : null
+}
+
 function claude(args: string[]): boolean {
   const result = spawnSync('claude', args, { encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' })
 
   return result.status === 0
 }
 
-// The mod lives in a folder marketplace, so edits there reach sessions with
-// /reload-plugins and no reinstall.
+// The mod lives in a folder marketplace; the install is updated after each
+// copy, so open sessions pick it up with /reload-plugins.
 function installMod(): boolean {
   const target = join(MODS_DIR, MOD_NAME)
   const manifestPath = join(MODS_DIR, '.claude-plugin', 'marketplace.json')
@@ -102,7 +151,12 @@ function installMod(): boolean {
 
   if (!claude(['plugin', 'marketplace', 'update', MARKETPLACE])) claude(['plugin', 'marketplace', 'add', MODS_DIR])
 
-  return claude(['plugin', 'install', `${MOD_NAME}@${MARKETPLACE}`, '--scope', 'user'])
+  if (!claude(['plugin', 'install', `${MOD_NAME}@${MARKETPLACE}`, '--scope', 'user'])) return false
+
+  // An install made by an older Claude Code points at a copy of the mod
+  // (plugins/cache/...), which open sessions' /reload-plugins loads again:
+  // update brings it to this version (or says it reads the folder itself).
+  return claude(['plugin', 'update', `${MOD_NAME}@${MARKETPLACE}`])
 }
 
 function readSettings(): JsonObject {
@@ -191,6 +245,7 @@ async function main(): Promise<void> {
 
   const ensurePath = copyApp()
   const nodePath = copyNode()
+  const ptyCopied = copyPty()
 
   writeSettings({ ...settings, hooks: withOurHooks(hooks, config.port, ensurePath, nodePath) })
 
@@ -208,6 +263,7 @@ async function main(): Promise<void> {
   const autoAccept = health && before !== null ? await restoreAutoAccept(config.port, config.token, before.autoAcceptUntil) : false
 
   console.log(`설치 위치: ${APP_DIR} (Node ${process.version})`)
+  console.log(`앱 안 터미널: ${ptyCopied ? '준비됨' : 'node-pty를 찾지 못해 꺼져 있어요'}`)
   console.log(`설정 파일: ${SETTINGS_PATH} (백업 후 훅 추가)`)
   console.log(`토큰 파일: ${CONFIG_PATH}`)
   console.log(`브리지: ${health ? '실행 중' : `시작 실패 (종료 코드 ${started.status})`}${autoAccept ? ' (Auto Accept 다시 켬)' : ''}`)

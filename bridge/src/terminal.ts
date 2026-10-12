@@ -1,0 +1,216 @@
+// Terminals that live on this PC and show inside the app: a shell (or
+// Claude Code, or Codex) in a real pseudo-terminal, typed into from the
+// widget or the phone. Output is kept, so a screen that joins later (or
+// another device) sees what came before.
+import { spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// The parts of node-pty this file uses.
+type Pty = {
+  onData: (listener: (data: string) => void) => void
+  onExit: (listener: (event: { exitCode: number }) => void) => void
+  write: (data: string) => void
+  resize: (cols: number, rows: number) => void
+  kill: () => void
+}
+
+type PtyModule = {
+  spawn: (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }) => Pty
+}
+
+// What a terminal runs: the shell, or a coding agent started in it.
+export type TermRun = 'shell' | 'claude' | 'codex'
+
+export type TermInfo = {
+  id: string
+  title: string
+  cwd: string
+  run: TermRun
+  startedAt: number
+  exitCode: number | null
+  exited: boolean
+}
+
+type Listener = { data: (chunk: string) => void; exit: (code: number) => void }
+
+type Term = TermInfo & { pty: Pty; backlog: string; listeners: Set<Listener> }
+
+// Output kept for a screen that joins later.
+const BACKLOG_CHARS = 256 * 1024
+const MAX_TERMS = 12
+const MIN_SIZE = 10
+const MAX_COLS = 400
+const MAX_ROWS = 200
+
+// node-pty ships as a native addon: in the installed app it sits beside the
+// bridge (app/pty), in the source tree in node_modules.
+function loadPty(): PtyModule | null {
+  const require = createRequire(import.meta.url)
+  const beside = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'pty', 'node_modules', '@lydell', 'node-pty')
+
+  for (const candidate of existsSync(beside) ? [beside, '@lydell/node-pty'] : ['@lydell/node-pty']) {
+    try {
+      const loaded: PtyModule = require(candidate)
+
+      return loaded
+    } catch {
+      // Try the next place.
+    }
+  }
+
+  return null
+}
+
+// The PATH as Windows has it now: one set after the bridge started (an
+// install that added a folder) reaches new terminals too.
+function freshPath(): string | null {
+  if (process.platform !== 'win32') return null
+
+  const read = spawnSync('powershell.exe', ['-NoProfile', '-Command', "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 5000,
+  })
+  const path = read.status === 0 ? read.stdout.trim() : ''
+
+  return path === '' ? null : path
+}
+
+function clampSize(value: number, max: number): number {
+  return Math.min(max, Math.max(MIN_SIZE, Math.floor(Number.isFinite(value) ? value : 80)))
+}
+
+// Text PowerShell takes as one literal string. PowerShell also ends a
+// single-quoted string at a typographic quote, and a control character
+// would act as a key in the terminal.
+function psLiteral(text: string): string {
+  return `'${text.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/['‘’‚‛]/g, "''")}'`
+}
+
+// A program PowerShell runs, quoted when its path has spaces.
+function psProgram(path: string): string {
+  return /\s/.test(path) ? `& ${psLiteral(path)}` : path
+}
+
+function info({ id, title, cwd, run, startedAt, exitCode, exited }: Term): TermInfo {
+  return { id, title, cwd, run, startedAt, exitCode, exited }
+}
+
+export class Terminals {
+  readonly #terms = new Map<string, Term>()
+  readonly #now: () => number
+  readonly #codex: () => string[] | null
+  #pty: PtyModule | null | undefined
+
+  constructor(now: () => number, codex: () => string[] | null) {
+    this.#now = now
+    this.#codex = codex
+  }
+
+  available(): boolean {
+    this.#pty ??= loadPty()
+
+    return this.#pty !== null
+  }
+
+  list(): TermInfo[] {
+    return [...this.#terms.values()].map(info)
+  }
+
+  // Opens a shell in `cwd` (the home folder when empty); Claude Code or
+  // Codex start in it, so the shell stays when they end.
+  open(input: { cwd: string; run: TermRun; cols: number; rows: number; title: string; prompt: string }): TermInfo | string {
+    if (!this.available() || this.#pty === null || this.#pty === undefined) return 'no terminal support'
+
+    const cwd = input.cwd === '' ? homedir() : input.cwd
+
+    if (!existsSync(cwd)) return 'no such folder'
+
+    // Finished terminals make room first.
+    for (const term of [...this.#terms.values()]) {
+      if (this.#terms.size < MAX_TERMS) break
+      if (term.exited) this.#terms.delete(term.id)
+    }
+
+    if (this.#terms.size >= MAX_TERMS) return 'too many terminals'
+
+    const path = freshPath()
+    const env = path === null ? { ...process.env } : { ...process.env, Path: path, PATH: path }
+    const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL ?? '/bin/bash')
+    const args = process.platform === 'win32' ? ['-NoLogo'] : ['-l']
+    const pty = this.#pty.spawn(shell, args, { name: 'xterm-256color', cols: clampSize(input.cols, MAX_COLS), rows: clampSize(input.rows, MAX_ROWS), cwd, env })
+    const term: Term = { id: randomUUID().slice(0, 8), title: input.title, cwd, run: input.run, startedAt: this.#now(), exitCode: null, exited: false, pty, backlog: '', listeners: new Set() }
+
+    pty.onData(data => {
+      term.backlog = (term.backlog + data).slice(-BACKLOG_CHARS)
+      for (const listener of term.listeners) listener.data(data)
+    })
+    pty.onExit(({ exitCode }) => {
+      term.exited = true
+      term.exitCode = exitCode
+      for (const listener of term.listeners) listener.exit(exitCode)
+    })
+
+    if (input.run === 'claude') pty.write('claude\r')
+    // Codex takes the first prompt on its command line, after its own flags
+    // (ChoiBuddy's, never typed by anyone).
+    if (input.run === 'codex') {
+      const [program, ...flags] = this.#codex() ?? ['codex']
+      const words = [psProgram(program ?? 'codex'), ...flags.map(flag => (/\s/.test(flag) ? psLiteral(flag) : flag)), ...(input.prompt === '' ? [] : [psLiteral(input.prompt)])]
+
+      pty.write(`${words.join(' ')}\r`)
+    }
+
+    this.#terms.set(term.id, term)
+
+    return info(term)
+  }
+
+  write(id: string, data: string): boolean {
+    const term = this.#terms.get(id)
+
+    if (term === undefined || term.exited) return false
+    term.pty.write(data)
+
+    return true
+  }
+
+  resize(id: string, cols: number, rows: number): boolean {
+    const term = this.#terms.get(id)
+
+    if (term === undefined || term.exited) return false
+    term.pty.resize(clampSize(cols, MAX_COLS), clampSize(rows, MAX_ROWS))
+
+    return true
+  }
+
+  close(id: string): boolean {
+    const term = this.#terms.get(id)
+
+    if (term === undefined) return false
+    if (!term.exited) term.pty.kill()
+    this.#terms.delete(id)
+
+    return true
+  }
+
+  // Follows a terminal: what it printed so far, then each new piece.
+  follow(id: string, listener: Listener): { backlog: string; exited: boolean; stop: () => void } | null {
+    const term = this.#terms.get(id)
+
+    if (term === undefined) return null
+    term.listeners.add(listener)
+
+    return { backlog: term.backlog, exited: term.exited, stop: () => term.listeners.delete(listener) }
+  }
+
+  closeAll(): void {
+    for (const term of this.#terms.values()) if (!term.exited) term.pty.kill()
+    this.#terms.clear()
+  }
+}

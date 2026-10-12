@@ -242,6 +242,21 @@ export function ensureCodexCommand(env: NodeJS.ProcessEnv = process.env): boolea
   return true
 }
 
+// Flags Codex needs to start in a terminal. Since 0.161 it first starts a
+// shared background server, which fails for the winget and Codex app builds
+// ("the CLI package does not match this platform or executable"); with
+// --no-daemon it runs on its own. Older Codex has no such option.
+export function codexLaunchArgs(program: string): string[] {
+  // A .cmd runs only through cmd; the path is ChoiBuddy's own find, quoted.
+  const help =
+    process.platform === 'win32'
+      ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${program}" --help"`], { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true, timeout: 15_000 })
+      : spawnSync(program, ['--help'], { encoding: 'utf8', timeout: 15_000 })
+
+  // No output at all when the program could not start.
+  return help.stdout?.includes('--no-daemon') === true ? ['--no-daemon'] : []
+}
+
 // codex.exe inside the Codex app (its Windows Store package). Null without it.
 export function findCodexApp(): string[] | null {
   const found = spawnSync('powershell', ['-NoProfile', '-Command', '(Get-AppxPackage -Name OpenAI.Codex).InstallLocation'], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
@@ -279,9 +294,11 @@ export type CodexTools = {
   install: () => Promise<boolean>
   // Makes sure typing `codex` works; false when there is no CLI to point at.
   command: () => boolean
+  // Flags a person's Codex needs to start in a terminal.
+  launchArgs: (program: string) => string[]
 }
 
-export const CODEX_TOOLS: CodexTools = { cli: findCodexCli, app: findCodexApp, install: installCodexCli, command: ensureCodexCommand }
+export const CODEX_TOOLS: CodexTools = { cli: findCodexCli, app: findCodexApp, install: installCodexCli, command: ensureCodexCommand, launchArgs: codexLaunchArgs }
 
 export type CodexTrust = { ours: number; trusted: number }
 

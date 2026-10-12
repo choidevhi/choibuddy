@@ -7,7 +7,8 @@ import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { ago, useI18n } from './i18n.ts'
 import { PlusIcon, TerminalIcon } from './icons.tsx'
-import { archiveSessions, deleteConversation, endSession, fetchHistory, openTerminal, reloadPlugins, renameSession } from './live.ts'
+import { archiveSessions, deleteConversation, endSession, fetchHistory, reloadPlugins, renameSession } from './live.ts'
+import { openTerminalTab } from './terminal.tsx'
 import { ContextMenu, type MenuEntry } from './menu.tsx'
 import { Picker } from './picker.tsx'
 import { ON_OFF, usePref } from './prefs.ts'
@@ -334,12 +335,9 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
     if (failed > 0) showToast(t('chat.actionFailed'))
   }
 
-  // A terminal on the session's PC, in its folder (or the PC's home folder).
-  const terminal = async (pcKey: string, cwd: string): Promise<void> => {
-    const connection = feedFor(feeds, pcKey)?.connection ?? null
-
-    showToast(connection !== null && (await openTerminal(connection, cwd)) ? t('terminal.opened') : t('chat.actionFailed'))
-  }
+  // A terminal on the session's PC, in its folder (or the PC's home
+  // folder), inside the app's terminal tab.
+  const terminal = (pcKey: string, cwd: string): void => openTerminalTab({ pcKey, cwd, run: 'shell', prompt: '', title: '' })
 
   const reloadSession = async (entry: PcEntry): Promise<void> => {
     const connection = feedFor(feeds, entry.pcKey)?.connection ?? null
@@ -349,7 +347,7 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
 
   const menuItems = (entry: PcEntry): Array<MenuEntry | null> => {
     const renameItem: MenuEntry = { label: t('menu.rename'), onSelect: () => setRenaming(entry) }
-    const terminalItem: MenuEntry = { label: t('menu.terminal'), onSelect: () => void terminal(entry.pcKey, entry.cwd) }
+    const terminalItem: MenuEntry = { label: t('menu.terminal'), onSelect: () => terminal(entry.pcKey, entry.cwd) }
 
     if (entry.live) {
       const canEnd = sessions.find(session => session.id === entry.sessionId)?.canPrompt === true
@@ -404,7 +402,7 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
       <div className="section-label convo-list-head">
         <span className="convo-list-pc">{shownFeed === null ? t('chat.sessions') : pcName(shownFeed)}</span>
         {shownPc !== null && (
-          <button type="button" className="icon-btn convo-list-tool" onClick={() => void terminal(shownPc, '')} title={t('terminal.open')} aria-label={t('terminal.open')}>
+          <button type="button" className="icon-btn convo-list-tool" onClick={() => terminal(shownPc, '')} title={t('terminal.open')} aria-label={t('terminal.open')}>
             <TerminalIcon size={15} />
           </button>
         )}

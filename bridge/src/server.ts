@@ -11,6 +11,7 @@ import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
 import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, codexTrust, setCodexHooks } from './codex.ts'
 import { AutoLanguage, parseLang } from './language.ts'
+import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
@@ -23,6 +24,8 @@ import { purgeTrash } from './trash.ts'
 const HOOK_BODY_LIMIT = 32 * 1024 * 1024
 const UPLOAD_LIMIT = 50 * 1024 * 1024
 const API_BODY_LIMIT = 256 * 1024
+// Terminal output a few milliseconds apart goes out as one event.
+const TERM_FLUSH_MS = 12
 // Just under the 600 s timeout the installer gives the PermissionRequest
 // hook, so the bridge answers "no decision" before Claude Code gives up.
 const HOLD_MS = 590_000
@@ -312,6 +315,17 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   // What Codex runs: this bridge's own Node and hook script.
   const codexHook = codexCommand(process.execPath, join(dirname(fileURLToPath(import.meta.url)), 'ensure.ts'))
   const codexTools = options.codexTools ?? CODEX_TOOLS
+  const terminals = new Terminals(now, () => codexLaunch())
+  // Screens following a terminal, with the paired device behind each (null:
+  // this PC's own app). A device is cut off when its access goes away.
+  const termStreams = new Map<ServerResponse, string | null>()
+  const endTermStreams = (match: (device: string | null) => boolean): void => {
+    for (const [stream, device] of termStreams) {
+      if (!match(device)) continue
+      stream.end()
+      termStreams.delete(stream)
+    }
+  }
   // The Codex app's own codex.exe, looked up once (it takes a moment).
   let codexAppFound: string[] | null | undefined
   let codexChecked: { at: number; trusted: boolean | null } | null = null
@@ -321,6 +335,19 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     codexAppFound ??= codexTools.app()
 
     return codexAppFound
+  }
+
+  // How a person's Codex starts in a terminal: the program and the flags it
+  // needs, worked out once per program.
+  let codexLaunched: { program: string; command: string[] } | null = null
+  const codexLaunch = (): string[] | null => {
+    const found = codexTools.cli() ?? codexApp()
+    const program = found?.[0]
+
+    if (found === null || program === undefined) return null
+    if (codexLaunched?.program !== program) codexLaunched = { program, command: [...found, ...codexTools.launchArgs(program)] }
+
+    return codexLaunched.command
   }
 
   // Whether Codex trusts ChoiBuddy's hooks (null: not connected, or Codex's
@@ -645,6 +672,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       options.saveConfig(config)
       for (const client of clients.keys()) client.end()
       clients.clear()
+      endTermStreams(() => true)
       log('all codes rotated')
       sendJson(res, 200, { ok: true })
 
@@ -832,6 +860,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       client.end()
       clients.delete(client)
     }
+    endTermStreams(device => device === deviceId)
   }
 
   const handleApi = async (req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> => {
@@ -1264,6 +1293,131 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       return
     }
 
+    // Terminals on this PC, shown in the app. The PC's own app may always
+    // use them; paired devices once the danger zone allows it.
+    if (url.pathname === '/api/term' || url.pathname.startsWith('/api/term/')) {
+      const allowed = caller.device === null || config.remoteTerminal
+
+      if (req.method === 'GET' && url.pathname === '/api/term') {
+        sendJson(res, 200, { available: terminals.available(), allowed, remote: config.remoteTerminal, terminals: allowed ? terminals.list() : [] })
+
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/term/remote') {
+        if (caller.device !== null) {
+          sendJson(res, 403, { ok: false, error: 'owner only' })
+
+          return
+        }
+
+        const body = await readBody(req, API_BODY_LIMIT)
+
+        config.remoteTerminal = bool(body === null ? null : parseJsonObject(body), 'on') ?? false
+        options.saveConfig(config)
+        if (!config.remoteTerminal) endTermStreams(device => device !== null)
+        log(`remote terminals ${config.remoteTerminal ? 'on' : 'off'}`)
+        sendJson(res, 200, { ok: true, remote: config.remoteTerminal })
+
+        return
+      }
+
+      if (!allowed) {
+        sendJson(res, 403, { ok: false, error: 'terminals are for this PC only' })
+
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/term/stream') {
+        const id = url.searchParams.get('id') ?? ''
+        let pending = ''
+        let flush: NodeJS.Timeout | null = null
+
+        // Pieces a few milliseconds apart go out as one event.
+        const send = (): void => {
+          flush = null
+          if (pending === '') return
+          res.write(`event: out\ndata: ${JSON.stringify(pending)}\n\n`)
+          pending = ''
+        }
+        const followed = terminals.follow(id, {
+          data: chunk => {
+            pending += chunk
+            flush ??= setTimeout(send, TERM_FLUSH_MS)
+          },
+          exit: code => {
+            send()
+            res.write(`event: exit\ndata: ${code}\n\n`)
+          },
+        })
+
+        if (followed === null) {
+          sendJson(res, 404, { ok: false })
+
+          return
+        }
+
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
+        res.write(`retry: 2000\nevent: out\ndata: ${JSON.stringify(followed.backlog)}\n\n`)
+        if (followed.exited) res.write('event: exit\ndata: 0\n\n')
+        termStreams.set(res, caller.device?.id ?? null)
+        req.on('close', () => {
+          if (flush !== null) clearTimeout(flush)
+          followed.stop()
+          termStreams.delete(res)
+        })
+
+        return
+      }
+
+      const body = req.method === 'POST' ? await readBody(req, API_BODY_LIMIT) : null
+      const parsed = body === null ? null : parseJsonObject(body)
+      const id = str(parsed, 'id') ?? ''
+
+      if (req.method === 'POST' && url.pathname === '/api/term/open') {
+        const requested = str(parsed, 'run')
+        const run: TermRun = requested === 'claude' || requested === 'codex' ? requested : 'shell'
+        const prompt = str(parsed, 'prompt')?.trim() ?? ''
+        const opened = terminals.open({ cwd: str(parsed, 'cwd')?.trim() ?? '', run, cols: num(parsed, 'cols') ?? 100, rows: num(parsed, 'rows') ?? 30, title: str(parsed, 'title') ?? '', prompt })
+
+        if (typeof opened === 'string') {
+          sendJson(res, 400, { ok: false, error: opened })
+
+          return
+        }
+
+        // Claude Code gets its first prompt through the mod once it starts.
+        if (run === 'claude' && prompt !== '') launchPrompts.push({ cwd: opened.cwd, text: prompt, at: now() })
+
+        log(`terminal ${opened.id} (${run}) in ${opened.cwd}`)
+        sendJson(res, 200, { ok: true, terminal: opened })
+
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/term/input') {
+        sendJson(res, terminals.write(id, str(parsed, 'data') ?? '') ? 200 : 404, {})
+
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/term/resize') {
+        sendJson(res, terminals.resize(id, num(parsed, 'cols') ?? 80, num(parsed, 'rows') ?? 24) ? 200 : 404, {})
+
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/term/close') {
+        sendJson(res, terminals.close(id) ? 200 : 404, {})
+
+        return
+      }
+
+      sendJson(res, 404, { ok: false })
+
+      return
+    }
+
     // Codex on this PC: whether it is there, ChoiBuddy's hooks are listed and
     // Codex trusts them.
     if (req.method === 'GET' && url.pathname === '/api/codex') {
@@ -1390,10 +1544,13 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const parsed = body === null ? null : parseJsonObject(body)
       const cwd = str(parsed, 'cwd')?.trim() ?? ''
       const prompt = str(parsed, 'prompt')?.trim() ?? ''
-      const opened = openSession(cwd)
+      const codex = str(parsed, 'agent') === 'codex'
+      // Codex starts without the first prompt here: a terminal window would
+      // split it up as its own arguments. The in-app terminal can pass it.
+      const opened = codex ? openTerminal(cwd, codexLaunch() ?? ['codex']) : openSession(cwd)
 
-      if (opened.ok && prompt !== '') launchPrompts.push({ cwd, text: prompt, at: now() })
-      log(opened.ok ? `new session in ${cwd} (${opened.terminal})` : `new session failed: ${opened.error}`)
+      if (opened.ok && !codex && prompt !== '') launchPrompts.push({ cwd, text: prompt, at: now() })
+      log(opened.ok ? `new ${codex ? 'Codex' : 'Claude'} session in ${cwd} (${opened.terminal})` : `new session failed: ${opened.error}`)
       sendJson(res, opened.ok ? 200 : 400, opened.ok ? { ok: true, terminal: opened.terminal } : { ok: false, error: opened.error })
 
       return
@@ -1562,6 +1719,9 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     setInterval(() => {
       if (store.prune().length > 0) scheduleSnapshot()
     }, PRUNE_MS),
+    setInterval(() => {
+      if (store.expireCommands()) scheduleSnapshot()
+    }, HEARTBEAT_MS),
   ]
 
   if (options.bindTailnet !== false) {
@@ -1580,6 +1740,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   }
 
   const close = async (): Promise<void> => {
+    terminals.closeAll()
     for (const timer of timers) clearInterval(timer)
     if (snapshotTimer !== null) clearTimeout(snapshotTimer)
     for (const id of [...held.keys()]) finish(id, {})

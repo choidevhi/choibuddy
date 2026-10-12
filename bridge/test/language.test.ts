@@ -41,7 +41,7 @@ test('turned on from a device, the bridge queues the restatement for the session
   const root = mkdtempSync(join(tmpdir(), 'choibuddy-language-'))
   const saved: string[] = []
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
     saveConfig: config => saved.push(config.autoLanguage ?? 'off'),
     galleryDir: join(root, 'gallery'),
     uploadsDir: join(root, 'uploads'),

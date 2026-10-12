@@ -4201,3 +4201,103 @@ body.resizing--column {
   border-radius: 5px;
   object-fit: cover;
 }
+
+/* Terminals on the PCs, inside the app */
+
+.term-main {
+  min-width: 0;
+  gap: 8px;
+}
+
+.term-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.term-screen {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-line);
+  background: #fbfbfc;
+  overflow: hidden;
+}
+
+:root[data-theme='dark'] .term-screen {
+  background: #111214;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .term-screen {
+    background: #111214;
+  }
+}
+
+.term-screen .xterm {
+  height: 100%;
+}
+
+.term-keys {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.term-key {
+  flex: none;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--card-line);
+  background: var(--card);
+  color: var(--text);
+  font: 600 12px var(--mono);
+}
+
+.term-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.term-item .term-close {
+  margin-left: auto;
+  opacity: 0.5;
+}
+
+.term-item:hover .term-close {
+  opacity: 1;
+}
+
+.term-back {
+  align-self: flex-start;
+}
+
+/* On a phone the list is the page until a terminal is picked. */
+@media (max-width: 700px) {
+  .convo-list.term-list {
+    display: flex;
+    border-right: none;
+  }
+}
+
+.command-output--note {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: normal;
+}
+
+.codex-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}

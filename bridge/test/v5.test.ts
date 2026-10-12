@@ -167,7 +167,7 @@ async function withBridge(body: (bridge: Bridge, base: string, claudeDir: string
   const claudeDir = mkdtempSync(join(tmpdir(), 'choibuddy-claude-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'choibuddy-uploads-'))
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [], trustTailnet: false, autoLanguage: null },
+    config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
     saveConfig: () => {},
     galleryDir: mkdtempSync(join(tmpdir(), 'choibuddy-gallery-')),
     uploadsDir,

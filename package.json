@@ -1,12 +1,13 @@
 {
   "name": "choibuddy",
   "private": true,
-  "version": "0.6.9",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite --config ui/vite.config.ts",
     "build": "vite build --config ui/vite.config.ts",
     "fetch-node": "node scripts/fetch-node.mjs",
+    "vendor-pty": "node scripts/vendor-pty.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p ui/tsconfig.json",
     "test": "node --no-warnings --test bridge/test/*.test.ts ui/test/*.test.ts",
     "bridge": "node --no-warnings bridge/src/main.ts",
@@ -17,7 +18,10 @@
   "packageManager": "pnpm@12.9.1",
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@lydell/node-pty": "1.2.0-beta.15",
     "@tauri-apps/api": "2.12.2",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "pretendard": "1.3.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",

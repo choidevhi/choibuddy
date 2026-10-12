@@ -4,8 +4,9 @@ import { useBackLayer } from './back.ts'
 import { showToast } from './confirm.tsx'
 import type { Feed } from './feeds.ts'
 import { useI18n } from './i18n.ts'
-import { fetchProjects, openNewSession } from './live.ts'
+import { type CodexState, fetchCodex, fetchProjects, fetchTerms, openNewSession, type SessionAgent, type TermState } from './live.ts'
 import { Picker } from './picker.tsx'
+import { openTerminalTab } from './terminal.tsx'
 
 type Props = {
   feeds: Feed[]
@@ -16,17 +17,23 @@ type Props = {
 
 const CUSTOM = ''
 
-// Opens Claude Code in a new terminal window on one of the PCs: pick the PC,
-// a folder Claude ran in before (or type a path), and optionally the first
-// prompt, which is handed to the session once it starts.
+// Starts Claude Code or Codex on one of the PCs: pick the PC, the agent, a
+// folder a session ran in before (or type a path), and optionally the first
+// prompt. It opens in the app's own terminal, so it can be typed into right
+// here; a window on the PC instead when asked, or when this device may not
+// use the PC's terminals.
 export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
   const { t } = useI18n()
   const reachable = feeds.filter(feed => feed.snapshot !== null)
   const [pcKey, setPcKey] = useState(preferredKey !== null && reachable.some(feed => feed.key === preferredKey) ? preferredKey : (reachable[0]?.key ?? ''))
   const [projects, setProjects] = useState<Project[]>([])
+  const [codex, setCodex] = useState<CodexState | null>(null)
+  const [terms, setTerms] = useState<TermState | null>(null)
+  const [agent, setAgent] = useState<SessionAgent>('claude')
   const [folder, setFolder] = useState(CUSTOM)
   const [custom, setCustom] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [pcWindow, setPcWindow] = useState(false)
   const [busy, setBusy] = useState(false)
   const feed = reachable.find(item => item.key === pcKey) ?? null
 
@@ -42,20 +49,39 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
       setProjects(list)
       setFolder(list[0]?.cwd ?? CUSTOM)
     })
+    void fetchCodex(feed.connection).then(state => {
+      if (!cancelled) setCodex(state)
+    })
+    void fetchTerms(feed.connection).then(state => {
+      if (!cancelled) setTerms(state)
+    })
 
     return () => {
       cancelled = true
     }
   }, [feed?.key, feed?.connection.token])
 
+  const hasCodex = codex !== null && (codex.installed || codex.cli)
+  const chosen: SessionAgent = hasCodex ? agent : 'claude'
+  const canApp = terms !== null && terms.available && terms.allowed
+  const inApp = canApp && !pcWindow
+  // A window on the PC cannot hand Codex its first prompt.
+  const promptOff = chosen === 'codex' && !inApp
   const cwd = folder === CUSTOM ? custom.trim() : folder
 
   const open = async (): Promise<void> => {
     if (feed === null || cwd === '') return
 
+    if (inApp) {
+      openTerminalTab({ pcKey: feed.key, cwd, run: chosen, prompt: prompt.trim(), title: '' })
+      onClose()
+
+      return
+    }
+
     setBusy(true)
 
-    const result = await openNewSession(feed.connection, cwd, prompt.trim())
+    const result = await openNewSession(feed.connection, cwd, promptOff ? '' : prompt.trim(), chosen)
 
     setBusy(false)
     showToast(result.ok ? t('newSession.opened', { terminal: result.terminal }) : `${t('newSession.failed')}: ${result.error}`)
@@ -67,7 +93,7 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
       <div className="sheet new-session" role="dialog" aria-modal="true" aria-label={t('newSession.title')} onClick={event => event.stopPropagation()}>
         <div className="confirm-body">
           <div className="sheet-title">{t('newSession.title')}</div>
-          <div className="confirm-hint">{t('newSession.hint')}</div>
+          <div className="confirm-hint">{inApp ? t('newSession.hintApp') : t('newSession.hint')}</div>
 
           {reachable.length > 1 && (
             <div className="form-row">
@@ -79,6 +105,20 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
                 options={reachable.map(item => ({ value: item.key, label: item.snapshot?.server.hostName ?? item.connection.baseUrl }))}
                 onChange={setPcKey}
               />
+            </div>
+          )}
+
+          {hasCodex && (
+            <div className="form-row">
+              <span className="form-label">{t('newSession.agent')}</span>
+              <span className="seg">
+                <button type="button" className={chosen === 'claude' ? 'on' : ''} onClick={() => setAgent('claude')}>
+                  Claude Code
+                </button>
+                <button type="button" className={chosen === 'codex' ? 'on' : ''} onClick={() => setAgent('codex')}>
+                  Codex
+                </button>
+              </span>
             </div>
           )}
 
@@ -109,7 +149,22 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
 
           <label className="form-row form-row--column">
             <span className="form-label">{t('newSession.prompt')}</span>
-            <textarea className="field" rows={3} value={prompt} placeholder={t('newSession.promptPlaceholder')} onChange={event => setPrompt(event.target.value)} />
+            <textarea
+              className="field"
+              rows={3}
+              value={promptOff ? '' : prompt}
+              disabled={promptOff}
+              placeholder={promptOff ? t('newSession.codexWindowPrompt') : t('newSession.promptPlaceholder')}
+              onChange={event => setPrompt(event.target.value)}
+            />
+          </label>
+
+          <label className="row">
+            <span className="row-text">
+              <span>{t('newSession.window')}</span>
+              {!canApp && terms !== null && <span className="row-hint">{t('newSession.windowOnly')}</span>}
+            </span>
+            <input type="checkbox" className="switch" checked={!inApp} disabled={!canApp} onChange={event => setPcWindow(event.target.checked)} />
           </label>
         </div>
         <footer className="sheet-actions">

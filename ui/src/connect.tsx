@@ -6,10 +6,11 @@ import { showToast } from './confirm.tsx'
 import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
 import { ago, duration, isLang, type Lang, LANGS, type MessageKey, type Translate, useI18n } from './i18n.ts'
 import { CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
-import { type CodexState, createDevice, fetchCodex, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setCodex, setTrustTailnet, type SetupStatus } from './live.ts'
+import { type CodexState, createDevice, fetchCodex, fetchSetup, fetchTerms, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setCodex, setRemoteTerminal, setTrustTailnet, type SetupStatus } from './live.ts'
 import { parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
+import { openTerminalTab } from './terminal.tsx'
 import { APP_VERSION, type UpdateState } from './update.tsx'
 
 function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; on: boolean; onChange: (next: boolean) => void }) {
@@ -289,10 +290,51 @@ function Guide({ localFeed }: { localFeed: Feed | null }) {
 // Codex on this PC: ChoiBuddy lists its hooks in Codex's hooks.json and has
 // Codex trust them (as its /hooks screen would); Codex picks them up when it
 // starts again.
+// When connecting did not go through: Codex asks once, in its own terminal,
+// whether to trust the hooks, and that answer settles it.
+function CodexHelp({ feed, onClose }: { feed: Feed; onClose: () => void }) {
+  const { t } = useI18n()
+
+  useBackLayer(true, onClose)
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet confirm-sheet codex-help" role="dialog" aria-modal="true" aria-label={t('codexHelp.title')} onClick={event => event.stopPropagation()}>
+        <div className="confirm-body">
+          <div className="sheet-title">{t('codexHelp.title')}</div>
+          <div className="confirm-hint">{t('codexHelp.why')}</div>
+          <ol className="codex-steps">
+            <li>{t('codexHelp.step1')}</li>
+            <li>{t('codexHelp.step2')}</li>
+            <li>{t('codexHelp.step3')}</li>
+          </ol>
+          <div className="row-hint">{t('codexHelp.noCodex')}</div>
+        </div>
+        <footer className="sheet-actions">
+          <button type="button" className="btn btn--deny" onClick={onClose}>
+            {t('action.close')}
+          </button>
+          <button
+            type="button"
+            className="btn btn--allow"
+            onClick={() => {
+              openTerminalTab({ pcKey: feed.key, cwd: '', run: 'codex', prompt: '', title: '' })
+              onClose()
+            }}
+          >
+            {t('codexHelp.open')}
+          </button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
 function CodexRow({ feed }: { feed: Feed }) {
   const { t } = useI18n()
   const [state, setState] = useState<CodexState | null>(null)
   const [busy, setBusy] = useState(false)
+  const [help, setHelp] = useState(false)
 
   useEffect(() => {
     void fetchCodex(feed.connection).then(setState)
@@ -306,8 +348,10 @@ function CodexRow({ feed }: { feed: Feed }) {
     const next = await setCodex(feed.connection, on)
 
     setBusy(false)
-    if (next === null) showToast(t('chat.actionFailed'))
-    else setState(next)
+    if (next !== null) setState(next)
+    // Not connected, or Codex did not take the trust: the person does it once in Codex.
+    if (on && (next === null || next.trusted !== true)) setHelp(true)
+    else if (next === null) showToast(t('chat.actionFailed'))
   }
 
   // Connecting may first install the Codex CLI, which takes a while.
@@ -327,14 +371,20 @@ function CodexRow({ feed }: { feed: Feed }) {
       </span>
       <span className="btn-row">
         {state.connected && state.trusted !== true && (
-          <button type="button" className="btn small btn--allow" disabled={busy} onClick={() => void change(true)}>
-            {t('codex.retrust')}
-          </button>
+          <>
+            <button type="button" className="btn small" disabled={busy} onClick={() => setHelp(true)}>
+              {t('codexHelp.show')}
+            </button>
+            <button type="button" className="btn small btn--allow" disabled={busy} onClick={() => void change(true)}>
+              {t('codex.retrust')}
+            </button>
+          </>
         )}
         <button type="button" className={`btn small ${state.connected ? '' : 'btn--allow'}`} disabled={busy} onClick={() => void change(!state.connected)}>
           {state.connected ? t('codex.disconnect') : t('codex.connect')}
         </button>
       </span>
+      {help && <CodexHelp feed={feed} onClose={() => setHelp(false)} />}
     </div>
   )
 }
@@ -497,6 +547,67 @@ function TrustTailnet({ feed }: { feed: Feed }) {
   )
 }
 
+// This PC only: whether paired devices may use its terminals. A terminal
+// runs whatever is typed into it, so turning it on is confirmed first.
+function RemoteTerminal({ feed }: { feed: Feed }) {
+  const { t } = useI18n()
+  const [on, setOn] = useState<boolean | null>(null)
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useBackLayer(asking, () => setAsking(false))
+
+  useEffect(() => {
+    void fetchTerms(feed.connection).then(state => setOn(state?.available === true ? state.remote : null))
+  }, [feed.connection.token])
+
+  if (on === null) return null
+
+  const apply = async (next: boolean): Promise<void> => {
+    setBusy(true)
+
+    const ok = await setRemoteTerminal(feed.connection, next)
+
+    setBusy(false)
+    setAsking(false)
+    if (ok) setOn(next)
+    else showToast(t('chat.actionFailed'))
+  }
+
+  return (
+    <div className="danger-pc">
+      <div className="row">
+        <span className="row-text">
+          <span className="danger-name">{t('danger.terminal')}</span>
+          <span className={`row-hint ${on ? 'bad' : ''}`}>{on ? t('danger.terminalOn') : t('danger.terminalHint')}</span>
+        </span>
+        {on ? (
+          <button type="button" className="btn small btn--deny" disabled={busy} onClick={() => void apply(false)}>
+            {t('danger.trustDisable')}
+          </button>
+        ) : (
+          <button type="button" className={`btn small ${asking ? 'danger-picked' : ''}`} disabled={busy} onClick={() => setAsking(true)}>
+            {t('danger.trustEnable')}
+          </button>
+        )}
+      </div>
+      {asking && !on && (
+        <div className="danger-confirm" role="alertdialog" aria-label={t('danger.terminal')}>
+          <strong>{t('danger.terminalAsk')}</strong>
+          <span className="btn-row">
+            <button type="button" className="btn small" onClick={() => setAsking(false)}>
+              {t('danger.cancel')}
+            </button>
+            <button type="button" className="btn small btn--danger" disabled={busy} onClick={() => void apply(true)}>
+              {t('danger.trustEnable')}
+            </button>
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Auto Accept per PC. Turning it on always goes through an in-app
 // confirmation that spells out what it does.
 function DangerZone({ feeds, now }: { feeds: Feed[]; now: number }) {
@@ -575,6 +686,7 @@ function DangerZone({ feeds, now }: { feeds: Feed[]; now: number }) {
         )
       })}
       {local !== undefined && <TrustTailnet feed={local} />}
+      {local !== undefined && <RemoteTerminal feed={local} />}
     </div>
   )
 }

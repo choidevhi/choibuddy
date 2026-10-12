@@ -2,6 +2,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Alert, type BrowserRequest, type CommandInfo, type Decision, PROMPT_MODES, type PromptMode, type Session } from '../../shared/protocol.ts'
 import { answerBrowserRequest, BrowserTab } from './browser.tsx'
+import { type TermRequest, TerminalTab, useTerminalRequests } from './terminal.tsx'
 import { type Feed, feedFor, loadSources, merge, type PcSession, type Source, useFeeds } from './feeds.ts'
 import { useTailnetAutoConnect } from './autoconnect.ts'
 import { closeTopLayer } from './back.ts'
@@ -27,6 +28,7 @@ import {
   PlusIcon,
   ShieldIcon,
   SunIcon,
+  TerminalIcon,
   VolumeIcon,
   XIcon,
 } from './icons.tsx'
@@ -37,7 +39,7 @@ import { platform, readPref, windowsShell } from './platform.ts'
 import { ON_OFF, usePref } from './prefs.ts'
 import { playChime } from './sound.ts'
 
-type Tab = 'home' | 'chat' | 'gallery' | 'browser' | 'docs' | 'connect'
+type Tab = 'home' | 'chat' | 'gallery' | 'browser' | 'terminal' | 'docs' | 'connect'
 
 type Theme = 'dark' | 'light'
 
@@ -380,6 +382,14 @@ export function App() {
   const autoAccept = feeds.some(feed => (feed.snapshot?.server.autoAcceptUntil ?? 0) > now)
   const activeTab: Tab = needsSetup && platform === 'android' ? 'connect' : tab
 
+  // A terminal asked for elsewhere (session list, menu, new session) opens in the terminal tab.
+  const [termRequest, setTermRequest] = useState<(TermRequest & { at: number }) | null>(null)
+
+  useTerminalRequests(request => {
+    setTermRequest({ ...request, at: Date.now() })
+    openTab('terminal')
+  })
+
   const openTab = (next: Tab): void => {
     if (next === tab) return
 
@@ -389,7 +399,7 @@ export function App() {
 
   // Ctrl+PageUp / Ctrl+PageDown step through the tabs, as in a browser.
   useEffect(() => {
-    const tabs: Tab[] = platform === 'windows' ? ['home', 'chat', 'gallery', 'browser', 'docs', 'connect'] : ['home', 'chat', 'gallery', 'docs', 'connect']
+    const tabs: Tab[] = platform === 'windows' ? ['home', 'chat', 'gallery', 'browser', 'terminal', 'docs', 'connect'] : ['home', 'chat', 'gallery', 'terminal', 'docs', 'connect']
 
     const onKey = (event: KeyboardEvent): void => {
       if (!event.ctrlKey || (event.key !== 'PageUp' && event.key !== 'PageDown')) return
@@ -444,6 +454,9 @@ export function App() {
                   <GlobeIcon size={17} />
                 </button>
               )}
+              <button type="button" className={activeTab === 'terminal' ? 'on' : ''} onClick={() => openTab('terminal')} title={t('tab.terminal')}>
+                <TerminalIcon size={17} />
+              </button>
               <button type="button" className={activeTab === 'docs' ? 'on' : ''} onClick={() => openTab('docs')} title={t('tab.docs')}>
                 <FileTextIcon size={17} />
               </button>
@@ -554,6 +567,8 @@ export function App() {
               <Gallery feeds={feeds} sessions={ordered} latestAt={merged.galleryLatest} now={now} tone={tone} />
             ) : activeTab === 'browser' ? (
               <BrowserTab session={current} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} />
+            ) : activeTab === 'terminal' ? (
+              <TerminalTab feeds={feeds} sessions={ordered} tone={tone} dark={theme === 'dark'} request={termRequest} />
             ) : activeTab === 'docs' ? (
               <Docs feeds={feeds} sessions={ordered} tone={tone} />
             ) : (

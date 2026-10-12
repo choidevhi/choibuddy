@@ -633,6 +633,8 @@ function ConversationPane(props: PaneProps) {
   const canDelete = entry !== null && !entry.live && live === null
   // A reload already waits for the session to be idle.
   const reloading = live?.queued.some(item => item.mode === 'command' && item.text === '/reload-plugins') === true
+  // A reload the session never answered: its mod is too old to take commands.
+  const reloadUnanswered = live?.commandLog.some(item => item.command === 'reload-plugins' && item.failed && item.text === '') === true
   const status = live?.status ?? 'ended'
 
   // A prompt's words, then the files sent with it: pictures (open in the
@@ -817,7 +819,11 @@ function ConversationPane(props: PaneProps) {
                     /{result.command}
                     {result.args === '' ? '' : ` ${result.args}`}
                   </div>
-                  {result.text !== '' && <pre className="command-output">{result.text}</pre>}
+                  {result.text !== '' ? (
+                    <pre className="command-output">{result.text}</pre>
+                  ) : (
+                    result.failed && <div className="command-output command-output--note">{t('command.unanswered')}</div>
+                  )}
                 </div>
               </div>
             ))}
@@ -859,8 +865,8 @@ function ConversationPane(props: PaneProps) {
       <div className="convo-foot">
         {live?.modOutdated === true && feed !== null && (
           <div className="mod-notice">
-            <span className="mod-notice-text">{reloading ? t('mod.reloading') : t('mod.outdated')}</span>
-            {!reloading && (
+            <span className="mod-notice-text">{reloading ? t('mod.reloading') : reloadUnanswered ? t('mod.reloadByHand') : t('mod.outdated')}</span>
+            {!reloading && !reloadUnanswered && (
               <button
                 type="button"
                 className="btn small"

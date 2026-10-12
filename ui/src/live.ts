@@ -295,9 +295,12 @@ export async function fetchProjects(connection: Connection): Promise<Project[]> 
 
 export type OpenResult = { ok: true; terminal: string } | { ok: false; error: string }
 
-export async function openNewSession(connection: Connection, cwd: string, prompt: string): Promise<OpenResult> {
+// The coding agents a new session can start.
+export type SessionAgent = 'claude' | 'codex'
+
+export async function openNewSession(connection: Connection, cwd: string, prompt: string, agent: SessionAgent): Promise<OpenResult> {
   try {
-    const res = await fetch(`${connection.baseUrl}/api/session/new`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ cwd, prompt }) })
+    const res = await fetch(`${connection.baseUrl}/api/session/new`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify({ cwd, prompt, agent }) })
     const body: { terminal?: string; error?: string } = await res.json()
 
     return res.ok ? { ok: true, terminal: body.terminal ?? '' } : { ok: false, error: body.error ?? String(res.status) }
@@ -318,7 +321,7 @@ export async function answerBrowser(connection: Connection, id: string, answer: 
   return res?.ok === true
 }
 
-async function post(connection: Connection, path: string, body: Record<string, string | boolean | string[]>): Promise<Response | null> {
+async function post(connection: Connection, path: string, body: Record<string, string | number | boolean | string[]>): Promise<Response | null> {
   return fetch(`${connection.baseUrl}${path}`, { method: 'POST', headers: authHeaders(connection, true), body: JSON.stringify(body) }).catch(() => null)
 }
 
@@ -421,4 +424,70 @@ export async function claimTailnet(baseUrl: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+// What a terminal on the PC runs: its shell, or a coding agent started in it.
+export type TermRun = 'shell' | 'claude' | 'codex'
+
+export type TermInfo = { id: string; title: string; cwd: string; run: TermRun; startedAt: number; exitCode: number | null; exited: boolean }
+
+// `allowed`: whether this device may use the PC's terminals (its own app
+// always; others once the PC's danger zone allows). `remote`: that setting.
+export type TermState = { available: boolean; allowed: boolean; remote: boolean; terminals: TermInfo[] }
+
+type TermBody = { id?: string; title?: string; cwd?: string; run?: string; startedAt?: number; exitCode?: number | null; exited?: boolean }
+
+function termOf(body: TermBody | undefined): TermInfo | null {
+  if (body === undefined || typeof body.id !== 'string' || typeof body.cwd !== 'string') return null
+
+  const run: TermRun = body.run === 'claude' || body.run === 'codex' ? body.run : 'shell'
+
+  return { id: body.id, title: body.title ?? '', cwd: body.cwd, run, startedAt: body.startedAt ?? 0, exitCode: body.exitCode ?? null, exited: body.exited === true }
+}
+
+export async function fetchTerms(connection: Connection): Promise<TermState | null> {
+  const res = await fetch(`${connection.baseUrl}/api/term`, { headers: authHeaders(connection) }).catch(() => null)
+  const body: { available?: boolean; allowed?: boolean; remote?: boolean; terminals?: TermBody[] } | null = res?.ok === true ? await res.json().catch(() => null) : null
+
+  if (body === null) return null
+
+  return {
+    available: body.available === true,
+    allowed: body.allowed === true,
+    remote: body.remote === true,
+    terminals: (body.terminals ?? []).flatMap(item => {
+      const term = termOf(item)
+
+      return term === null ? [] : [term]
+    }),
+  }
+}
+
+// A new terminal on the PC; the reason as text when it could not open.
+export async function openTerm(connection: Connection, input: { cwd: string; run: TermRun; cols: number; rows: number; title: string; prompt: string }): Promise<TermInfo | string> {
+  const res = await post(connection, '/api/term/open', input)
+  const body: { terminal?: TermBody; error?: string } | null = res === null ? null : await res.json().catch(() => null)
+
+  return termOf(body?.terminal) ?? body?.error ?? 'unreachable'
+}
+
+export async function termInput(connection: Connection, id: string, data: string): Promise<boolean> {
+  return (await post(connection, '/api/term/input', { id, data }))?.ok === true
+}
+
+export async function termResize(connection: Connection, id: string, cols: number, rows: number): Promise<boolean> {
+  return (await post(connection, '/api/term/resize', { id, cols, rows }))?.ok === true
+}
+
+export async function termClose(connection: Connection, id: string): Promise<boolean> {
+  return (await post(connection, '/api/term/close', { id }))?.ok === true
+}
+
+export async function setRemoteTerminal(connection: Connection, on: boolean): Promise<boolean> {
+  return (await post(connection, '/api/term/remote', { on }))?.ok === true
+}
+
+// The terminal's output as server-sent events (EventSource takes no headers).
+export function termStreamUrl(connection: Connection, id: string): string {
+  return `${connection.baseUrl}/api/term/stream?id=${encodeURIComponent(id)}&token=${encodeURIComponent(connection.token)}`
 }

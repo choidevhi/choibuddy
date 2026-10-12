@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ChoiBuddy",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "identifier": "com.choidev.choibuddy",
   "build": {
     "beforeDevCommand": "corepack pnpm dev",
     "devUrl": "http://localhost:1430",
-    "beforeBuildCommand": "corepack pnpm run fetch-node && corepack pnpm build",
+    "beforeBuildCommand": "corepack pnpm run fetch-node && corepack pnpm run vendor-pty && corepack pnpm build",
     "frontendDist": "../../ui/dist"
   },
   "app": {
@@ -67,7 +67,8 @@
       "../../mod/.claude-plugin/plugin.json": "mod/.claude-plugin/plugin.json",
       "../../mod/hooks/": "mod/hooks/",
       "runtime/node.exe": "runtime/node.exe",
-      "runtime/LICENSE": "runtime/LICENSE"
+      "runtime/LICENSE": "runtime/LICENSE",
+      "runtime/pty/": "runtime/pty/"
     },
     "windows": {
       "nsis": {
