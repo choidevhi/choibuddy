@@ -9,7 +9,7 @@ import { type Config, type Device, hashToken, newToken, VERSION } from './config
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
-import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, codexTrust, setCodexHooks } from './codex.ts'
+import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, type CodexTrust, codexTrust, setCodexHooks } from './codex.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
@@ -327,14 +327,15 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     }
   }
   // The Codex app's own codex.exe, looked up once (it takes a moment).
-  let codexAppFound: string[] | null | undefined
+  // Kept also when there is none, or every check would ask PowerShell again.
+  let codexAppFound: { program: string[] | null } | null = null
   let codexChecked: { at: number; trusted: boolean | null } | null = null
   let codexInstalling: Promise<boolean> | null = null
 
   const codexApp = (): string[] | null => {
-    codexAppFound ??= codexTools.app()
+    codexAppFound ??= { program: codexTools.app() }
 
-    return codexAppFound
+    return codexAppFound.program
   }
 
   // How a person's Codex starts in a terminal: the program and the flags it
@@ -361,8 +362,14 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     if (!state.connected) return { ...state, trusted: null }
     if (!trust && codexChecked !== null && now() - codexChecked.at < CODEX_CHECK_MS) return { ...state, trusted: codexChecked.trusted }
 
-    const program = codexApp() ?? cli
-    const seen = program === null ? null : await codexTrust([...program, 'app-server'], homedir(), trust)
+    // When Windows will not start the app's codex.exe, or it gives no
+    // answer, the CLI answers.
+    let seen: CodexTrust | null = null
+
+    for (const program of [codexApp(), cli]) {
+      if (program !== null && seen === null) seen = await codexTrust([...program, 'app-server'], homedir(), trust)
+    }
+
     const trusted = seen === null ? null : seen.ours > 0 && seen.trusted === seen.ours
 
     codexChecked = { at: now(), trusted }

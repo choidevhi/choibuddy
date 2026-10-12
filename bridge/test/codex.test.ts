@@ -314,3 +314,56 @@ test('Codex starts with --no-daemon only when it has that option', { skip: proce
   assert.deepEqual(codexLaunchArgs(older), [])
   assert.deepEqual(codexLaunchArgs(join(root, 'missing.exe')), [])
 })
+
+test("Codex's status answers when Windows won't start the Codex app's codex.exe: the CLI checks the trust", async () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-codex-app-'))
+  let clock = Date.now()
+  let appLookups = 0
+  const bridge = await startBridge({
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
+    saveConfig: () => {},
+    galleryDir: join(root, 'gallery'),
+    uploadsDir: join(root, 'uploads'),
+    docBackupDir: join(root, 'backups'),
+    claudeDir: join(root, 'claude'),
+    log: () => {},
+    bindTailnet: false,
+    read: () => null,
+    modManifest: join(root, 'no-mod.json'),
+    now: () => clock,
+    codexHome: join(root, 'codex'),
+    codexTools: {
+      cli: () => [process.execPath, '--no-warnings', join(import.meta.dirname, 'fake-codex-app-server.ts'), join(root, 'codex', 'hooks.json'), join(root, 'trust.json')],
+      // spawn throws for this one, as it does for some installs of the app (EPERM).
+      app: () => {
+        appLookups += 1
+
+        return ['codex\u0000.exe']
+      },
+      install: async () => true,
+      command: () => true,
+      launchArgs: () => [],
+    },
+  })
+  const url = `http://127.0.0.1:${bridge.port}`
+  const headers = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+
+  try {
+    const connect = await fetch(`${url}/api/codex`, { method: 'POST', headers, body: JSON.stringify({ on: true }) })
+    const connected = parseJsonObject(await connect.text())
+
+    assert.equal(connect.status, 200)
+    assert.equal(connected?.trusted, true)
+
+    // A minute on, the check runs again: still an answer, and the app was looked up once.
+    clock += 61_000
+
+    const asked = await fetch(`${url}/api/codex`, { headers })
+
+    assert.equal(asked.status, 200)
+    assert.equal(parseJsonObject(await asked.text())?.trusted, true)
+    assert.equal(appLookups, 1)
+  } finally {
+    await bridge.close()
+  }
+})

@@ -317,17 +317,28 @@ export const CODEX_TOOLS: CodexTools = { cli: findCodexCli, app: findCodexApp, i
 
 export type CodexTrust = { ours: number; trusted: number }
 
+// Starts `codex app-server`, or null when Windows refuses the program. It
+// refuses some installs of the Codex app's own codex.exe (spawn EPERM), and
+// spawn throws that instead of reporting it.
+function spawnAppServer(program: string, args: string[]) {
+  try {
+    // npm's codex.cmd runs through the shell.
+    return spawn(program, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: program.toLowerCase().endsWith('.cmd') })
+  } catch {
+    return null
+  }
+}
+
 // Talks to Codex's own app-server, which works out each hook's key and hash
 // the way this Codex version does, and records trust the way its /hooks
 // screen does. `trust` false only looks.
 export function codexTrust(command: string[], cwd: string, trust: boolean): Promise<CodexTrust | null> {
   const [program, ...args] = command
+  const child = program === undefined ? null : spawnAppServer(program, args)
 
-  if (program === undefined) return Promise.resolve(null)
+  if (child === null) return Promise.resolve(null)
 
   return new Promise(resolve => {
-    // npm's codex.cmd runs through the shell.
-    const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: program.toLowerCase().endsWith('.cmd') })
     const waiting = new Map<number, (reply: JsonObject) => void>()
     let buffered = ''
     let nextId = 1
