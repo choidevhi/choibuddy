@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Gallery } from '../src/gallery.ts'
 import { editPreview } from '../src/previews.ts'
-import { type HookInput, parseHookInput, Store } from '../src/store.ts'
+import { type HookInput, modAtLeast, parseHookInput, Store } from '../src/store.ts'
 
 const SERVER = { pcId: 'pc-1', hostName: 'pc', tailnetUrl: null, version: 'test', autoAcceptUntil: 0, trustTailnet: false, autoLanguage: null }
 
@@ -367,4 +367,37 @@ test('a command an idle session never answers leaves the queue as failed', () =>
     session?.commandLog.map(entry => [entry.command, entry.failed, entry.text]),
     [['reload-plugins', true, '']],
   )
+})
+
+test('a stop goes to the mod once, and only to a mod that can stop', () => {
+  const { store, tick } = makeStore()
+
+  store.apply(hook('SessionStart', { source: 'startup' }))
+  assert.equal(store.askStop('sess-1'), 'no-mod')
+  assert.equal(store.askStop('nope'), 'no-session')
+
+  // A mod from before 0.5.3 would drop the ask.
+  store.takePrompts('sess-1')
+  store.noteMod('sess-1', '0.5.2')
+  assert.equal(store.askStop('sess-1'), 'old-mod')
+  assert.equal(store.snapshot(SERVER).sessions[0]?.canStop, false)
+
+  store.noteMod('sess-1', '0.5.3')
+  assert.equal(store.snapshot(SERVER).sessions[0]?.canStop, true)
+  assert.equal(store.askStop('sess-1'), 'queued')
+  assert.equal(store.takeStop('sess-1'), true)
+  assert.equal(store.takeStop('sess-1'), false)
+
+  tick(11_000)
+  assert.equal(store.snapshot(SERVER).sessions[0]?.canStop, false)
+})
+
+test('mod versions compare by their numbers', () => {
+  assert.equal(modAtLeast('0.5.3', [0, 5, 3]), true)
+  assert.equal(modAtLeast('0.5.10', [0, 5, 3]), true)
+  assert.equal(modAtLeast('0.6', [0, 5, 3]), true)
+  assert.equal(modAtLeast('0.5.2', [0, 5, 3]), false)
+  assert.equal(modAtLeast('0.5', [0, 5, 3]), false)
+  assert.equal(modAtLeast(undefined, [0, 5, 3]), false)
+  assert.equal(modAtLeast('beta', [0, 5, 3]), false)
 })

@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { HOME_DIR, loadConfig, log, saveConfig } from './config.ts'
 import { startBridge } from './server.ts'
+import { Tailnet } from './tailnet.ts'
 
 process.on('uncaughtException', error => log(`uncaught: ${error.stack ?? error.message}`))
 process.on('unhandledRejection', reason => log(`unhandled: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`))
@@ -15,8 +16,12 @@ try {
   // started with a home of its own (a demo, screenshots) leaves the
   // person's Codex alone unless given one.
   const codexHome = process.env.CODEX_HOME ?? (process.env.CHOIBUDDY_HOME === undefined ? join(homedir(), '.codex') : undefined)
+  // Such a bridge also stays off the tailnet: it neither listens there nor
+  // finds the person's other PCs, so a test screen never pairs with them.
+  const ownHome = process.env.CHOIBUDDY_HOME !== undefined
+  const tailscale = ownHome ? new Tailnet(() => Promise.resolve(null), Date.now) : undefined
 
-  await startBridge({ config, saveConfig, log, galleryDir: join(HOME_DIR, 'gallery'), uploadsDir: join(HOME_DIR, 'uploads'), docBackupDir: join(HOME_DIR, 'doc-backups'), claudeDir, codexHome })
+  await startBridge({ config, saveConfig, log, galleryDir: join(HOME_DIR, 'gallery'), uploadsDir: join(HOME_DIR, 'uploads'), docBackupDir: join(HOME_DIR, 'doc-backups'), claudeDir, codexHome, bindTailnet: !ownHome, tailscale })
 } catch (error) {
   const code = error instanceof Error && 'code' in error ? error.code : null
 

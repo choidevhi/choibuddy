@@ -216,6 +216,9 @@ export type Session = {
   // The session runs an older companion mod than the one installed on its
   // PC; /reload-plugins brings it up to date.
   modOutdated: boolean
+  // True when the session's mod can stop its running turn from here, as Esc
+  // does in the terminal (mod 0.5.3 and later).
+  canStop: boolean
 }
 
 // How a prompt meets a turn that is still running: steer (the turn stops once

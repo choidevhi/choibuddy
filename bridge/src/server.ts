@@ -746,6 +746,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
         scheduleSnapshot()
       }
 
+      const stop = sessionId !== null && store.takeStop(sessionId)
       const prompts = sessionId === null ? [] : store.takePrompts(sessionId)
       const commands = sessionId === null ? [] : store.takeCommands(sessionId)
       const session = sessionId === null ? undefined : store.sessions.get(sessionId)
@@ -757,12 +758,12 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
         scheduleSnapshot()
       }
 
-      if (prompts.length > 0 || commands.length > 0) {
-        log(`delivering ${prompts.length} prompt(s), ${commands.length} command(s) to ${sessionId}`)
+      if (prompts.length > 0 || commands.length > 0 || stop) {
+        log(`delivering ${stop ? 'a stop, ' : ''}${prompts.length} prompt(s), ${commands.length} command(s) to ${sessionId}`)
         scheduleSnapshot()
       }
       // A bridge that restarted lost the session's commands: the mod sends them again.
-      sendJson(res, 200, { ok: true, prompts, commands, needCommands: sessionId !== null && !store.knowsCommands(sessionId) })
+      sendJson(res, 200, { ok: true, stop, prompts, commands, needCommands: sessionId !== null && !store.knowsCommands(sessionId) })
 
       return
     }
@@ -1262,6 +1263,19 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
       log(`reload plugins in ${sessionId}: ${result}`)
       scheduleSnapshot()
+      sendJson(res, result === 'queued' ? 200 : 409, result === 'queued' ? { ok: true } : { ok: false, error: result })
+
+      return
+    }
+
+    // Stops the session's running turn, as Esc does in the terminal: the
+    // running tool stops too, and what was done stays.
+    if (req.method === 'POST' && url.pathname === '/api/sessions/stop') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const sessionId = str(body === null ? null : parseJsonObject(body), 'sessionId') ?? ''
+      const result = store.askStop(sessionId)
+
+      log(`stop ${sessionId}: ${result}`)
       sendJson(res, result === 'queued' ? 200 : 409, result === 'queued' ? { ok: true } : { ok: false, error: result })
 
       return

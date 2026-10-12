@@ -6,7 +6,7 @@ import { Buddy, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type MessageKey, useI18n } from './i18n.ts'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
-import { ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
+import { ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, StopIcon, TrashIcon, XIcon } from './icons.tsx'
 import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
 import { deleteConversation, fetchConversation, fetchGallery, reloadPlugins, type Uploaded } from './live.ts'
@@ -17,6 +17,7 @@ import { type PcEntry, useSessionNav } from './sessions.tsx'
 import { closeLeaf, forgetSession, leavesOf, MAX_TILES, openBrowserBeside, sessionLeavesOf, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 import { Picker } from './picker.tsx'
 import { hasBrowser as browserAvailable, platform, readPref } from './platform.ts'
+import { askStop } from './stop.ts'
 import { useTypewriter } from './typewriter.ts'
 
 const PAGE = 150
@@ -228,14 +229,16 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
     else attach([file])
   }
 
-  const send = async (): Promise<void> => {
+  // `now`: stop what Claude is doing and send at once (Ctrl+Enter), whatever
+  // the box's mode says, like Claude Code's "send now".
+  const send = async (now = false): Promise<void> => {
     if (!ready || text === '' || sending || uploading) return
 
     setSending(true)
 
     const owner = session.id
     const sentText = text
-    const sentMode = busy ? mode : null
+    const sentMode = busy ? (now ? 'interrupt' : mode) : null
     const ok = await onSend(owner, sentText, sentMode ?? undefined)
 
     setSending(false)
@@ -288,7 +291,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      void send()
+      void send(event.ctrlKey || event.metaKey)
     }
   }
 
@@ -418,7 +421,19 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
             }
           }}
         />
-        <button type="button" className="btn btn--allow" disabled={!ready || sending || uploading || text === ''} onClick={() => void send()}>
+        {busy && (
+          <button type="button" className="btn btn--deny composer-stop" onClick={() => askStop(session.id)} title={t('chat.stopHint')} aria-label={t('chat.stop')}>
+            <StopIcon size={14} />
+            {t('chat.stop')}
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn--allow"
+          disabled={!ready || sending || uploading || text === ''}
+          title={busy ? t('chat.sendNowHint') : undefined}
+          onClick={() => void send()}
+        >
           {t('action.send')}
         </button>
       </div>

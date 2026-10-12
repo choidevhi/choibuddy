@@ -117,6 +117,24 @@ export function parseSlash(text: string): { command: string; args: string } | nu
 
 export type QueueResult = 'queued' | 'no-session' | 'no-mod'
 
+// The first companion mod that stops a running turn when asked.
+const STOP_MOD = [0, 5, 3]
+
+// Whether a mod's version is `least` or later; an unknown one is not.
+export function modAtLeast(version: string | undefined, least: number[]): boolean {
+  if (version === undefined || !/^\d+(\.\d+)*$/.test(version)) return false
+
+  const parts = version.split('.').map(Number)
+
+  for (const [index, want] of least.entries()) {
+    const have = parts[index] ?? 0
+
+    if (have !== want) return have > want
+  }
+
+  return true
+}
+
 // What the bridge knows about a session it is about to bring back: its
 // folder, its transcript and when it last did something.
 export type Revival = { cwd: string; transcript: string; at: number }
@@ -133,6 +151,8 @@ export class Store {
   readonly pending = new Map<string, PendingEntry>()
   limits: Limits | null = null
   readonly #modSeen = new Map<string, number>()
+  // Sessions asked to stop, until their mod polls.
+  readonly #stops = new Set<string>()
   // Sessions Claude Code ended while this bridge ran. A mod that still polls
   // for one does not bring it back.
   readonly #ended = new Set<string>()
@@ -232,6 +252,7 @@ export class Store {
       commandLog: [],
       canCommand: false,
       modOutdated: false,
+      canStop: false,
     }
   }
 
@@ -724,6 +745,23 @@ export class Store {
     else this.#modVersions.set(sessionId, version)
   }
 
+  // The person asked to stop the session's running turn (Esc in the
+  // terminal); its mod takes the ask with its next poll.
+  askStop(sessionId: string): QueueResult | 'old-mod' {
+    const now = this.#deps.now()
+
+    if (!this.sessions.has(sessionId)) return 'no-session'
+    if (!this.#modAlive(sessionId, now)) return 'no-mod'
+    if (!modAtLeast(this.#modVersions.get(sessionId), STOP_MOD)) return 'old-mod'
+    this.#stops.add(sessionId)
+
+    return 'queued'
+  }
+
+  takeStop(sessionId: string): boolean {
+    return this.#stops.delete(sessionId)
+  }
+
   setInstalledMod(version: string | null): void {
     this.#installedMod = version
   }
@@ -944,6 +982,7 @@ export class Store {
       canPrompt: this.#modAlive(session.id, now),
       canCommand: this.#modAlive(session.id, now) && (this.#commands.has(session.id) || this.#latestCommands !== null),
       modOutdated: this.#modOutdated(session.id, now),
+      canStop: this.#modAlive(session.id, now) && modAtLeast(this.#modVersions.get(session.id), STOP_MOD),
       queued: [
         ...(this.#outgoing.get(session.id) ?? []).map(item => ({ text: item.text, mode: item.mode })),
         ...(this.#commandsOut.get(session.id) ?? []).map(item => ({ text: `/${item.command}${item.args === '' ? '' : ` ${item.args}`}`, mode: 'command' as const })),

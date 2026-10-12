@@ -4301,3 +4301,9 @@ body.resizing--column {
   font-size: 13px;
   line-height: 1.5;
 }
+
+.composer-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

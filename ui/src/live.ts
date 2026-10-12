@@ -28,6 +28,17 @@ export async function dismissSession(connection: Connection, sessionId: string):
   }).catch(() => undefined)
 }
 
+// Stops the session's running turn, as Esc does in its terminal.
+export async function stopSession(connection: Connection, sessionId: string): Promise<'ok' | 'old-mod' | 'failed'> {
+  const res = await post(connection, '/api/sessions/stop', { sessionId })
+
+  if (res?.ok === true) return 'ok'
+
+  const body: { error?: string } | null = res === null ? null : await res.json().catch(() => null)
+
+  return body?.error === 'old-mod' ? 'old-mod' : 'failed'
+}
+
 export async function sendPrompt(connection: Connection, sessionId: string, text: string, mode: PromptMode): Promise<'queued' | 'no-mod' | 'failed'> {
   try {
     const res = await fetch(`${connection.baseUrl}/api/prompt`, {

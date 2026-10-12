@@ -1,14 +1,16 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import { browserText, commandsOf, joinPrompts, needsCommands, promptsOf } from '../hooks/register.ts'
+import { browserText, commandsOf, joinPrompts, needsCommands, promptsOf, stopAsked } from '../hooks/register.ts'
 
 const NOW = Date.parse('2026-10-11T10:00:00Z')
 
 type Sent = { url: string; body: string }
 
 // Stands in for the engine and the bridge: records what the mod posts and
-// answers polls with `queue` (and `commands`) once.
-function engineBeneath(on: On, sent: Sent[], submitted: string[], queue: string[], commands: string[] = [], ran: string[] = [], mode = 'steer', needCommands = false): void {
+// answers polls with `queue` (and `commands`, and a stop) once.
+function engineBeneath(on: On, sent: Sent[], submitted: string[], queue: string[], commands: string[] = [], ran: string[] = [], mode = 'steer', needCommands = false, stop = false): void {
+  let stopping = stop
+
   on('session.id', () => ({ value: 'sess-1' }))
   on('session.usage', () => ({
     value: { startedAt: NOW, context: { window: 200_000, tokens: 20_000, percent: 10 }, rateLimits: [] },
@@ -21,8 +23,11 @@ function engineBeneath(on: On, sent: Sent[], submitted: string[], queue: string[
     const isPoll = e.url.endsWith('/mod/poll')
     const prompts = isPoll ? queue.splice(0).map(text => ({ id: text, text, mode })) : []
     const queued = isPoll ? commands.splice(0).map(line => ({ id: `c-${line}`, command: line.split(' ')[0], args: line.split(' ').slice(1).join(' ') })) : []
+    const stopNow = isPoll && stopping
 
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, prompts, commands: queued, needCommands: isPoll && needCommands }) } }
+    if (isPoll) stopping = false
+
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, stop: stopNow, prompts, commands: queued, needCommands: isPoll && needCommands }) } }
   })
   on('command.list', () => ({ value: [{ name: 'effort', description: 'Set effort', source: 'builtin' }] }))
   on('command.run', (_, e) => {
@@ -144,7 +149,8 @@ test('브리지가 명령 목록을 잃었다고 하면 다시 보낸다', async
 
   const atStart = sent.filter(item => item.url.endsWith('/mod/commands')).length
 
-  await clock.advance(1600)
+  // One poll.
+  await clock.advance(500)
 
   expect(sent.filter(item => item.url.endsWith('/mod/commands')).length).toBe(atStart + 1)
 })
@@ -248,6 +254,32 @@ test('멈추고 보내기는 돌고 있는 턴을 멈추고 바로 보낸다', a
   await clock.advance(1600)
   expect(aborted).toEqual(['t2'])
   expect(submitted).toEqual(['그만하고 이거 해줘'])
+})
+
+test('중지를 누르면 돌고 있는 턴을 Esc처럼 바로 멈춘다', async ($, on) => {
+  const submitted: string[] = []
+  const aborted: string[] = []
+  const clock = mock.clock(on, { now: NOW })
+
+  engineBeneath(on, [], submitted, [], [], [], 'steer', false, true)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.abort', (_, e) => {
+    aborted.push(e.turnId)
+
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: '고쳐줘', turnId: 't3' })
+  await clock.advance(600)
+  expect(aborted).toEqual(['t3'])
+  expect(submitted).toEqual([])
+})
+
+test('브리지 답에서 중지 요청을 읽는다', () => {
+  expect(stopAsked('{"stop":true,"prompts":[]}')).toBe(true)
+  expect(stopAsked('{"stop":false}')).toBe(false)
+  expect(stopAsked('{"prompts":[]}')).toBe(false)
+  expect(stopAsked('not json')).toBe(false)
 })
 
 test('작업 중에 보낸 말 여러 개는 보낸 순서대로 한 프롬프트가 된다', () => {

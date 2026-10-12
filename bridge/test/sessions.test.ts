@@ -171,6 +171,21 @@ test('ending a session sends /exit through the mod, and the mod is asked for los
   })
 })
 
+test('stop reaches a mod that can stop with its next poll, once; an older mod is told apart', async () => {
+  await withBridge({}, async ({ url }) => {
+    await hook(url, { hook_event_name: 'SessionStart', session_id: 'live-1', source: 'startup' })
+    assert.equal((await api(url, '/api/sessions/stop', { sessionId: 'live-1' })).status, 409)
+
+    await api(url, '/mod/poll', { sessionId: 'live-1', mod: '0.5.2' }, {})
+    assert.equal(str((await api(url, '/api/sessions/stop', { sessionId: 'live-1' })).json, 'error'), 'old-mod')
+
+    await api(url, '/mod/poll', { sessionId: 'live-1', mod: '0.5.3' }, {})
+    assert.equal((await api(url, '/api/sessions/stop', { sessionId: 'live-1' })).status, 200)
+    assert.equal(bool((await api(url, '/mod/poll', { sessionId: 'live-1', mod: '0.5.3' }, {})).json, 'stop'), true)
+    assert.equal(bool((await api(url, '/mod/poll', { sessionId: 'live-1', mod: '0.5.3' }, {})).json, 'stop'), false)
+  })
+})
+
 test('other PCs of the same account with a bridge are found; phones, strangers and this PC are not', async () => {
   const health = {
     'http://100.88.0.3:47130': { pcId: 'pc-laptop', version: '0.5.9', trustTailnet: true },

@@ -32,12 +32,13 @@ import {
   VolumeIcon,
   XIcon,
 } from './icons.tsx'
-import { ConnectionContext, fetchCommands, type LinkState, sendDecision, sendPrompt, type Uploaded, uploadFile } from './live.ts'
+import { ConnectionContext, fetchCommands, type LinkState, sendDecision, sendPrompt, stopSession, type Uploaded, uploadFile } from './live.ts'
 import { NewSessionSheet } from './newsession.tsx'
 import { PendingSheet } from './pending.tsx'
 import { hasBrowser, platform, readPref, windowsShell } from './platform.ts'
 import { ON_OFF, usePref } from './prefs.ts'
 import { playChime } from './sound.ts'
+import { useStopRequests } from './stop.ts'
 
 type Tab = 'home' | 'chat' | 'gallery' | 'browser' | 'terminal' | 'docs' | 'connect'
 
@@ -332,6 +333,14 @@ export function App() {
 
     return result === 'queued'
   }
+
+  // Stop pressed in a prompt box: that session's PC stops its running turn.
+  useStopRequests(sessionId => {
+    const target = feedFor(feeds, sessions.find(session => session.id === sessionId)?.pcKey)
+
+    if (target === null) return
+    void stopSession(target.connection, sessionId).then(result => setToast(result === 'ok' ? t('toast.stopped') : result === 'old-mod' ? t('toast.stopOldMod') : t('toast.promptFailed')))
+  })
 
   const loadCommands = async (sessionId: string): Promise<CommandInfo[]> => {
     const target = feedFor(feeds, sessions.find(session => session.id === sessionId)?.pcKey)

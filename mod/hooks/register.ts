@@ -7,10 +7,11 @@
 import type { EngineInterface, Register, SessionContextUsage, SessionCost, SessionRateLimit, TurnStepChunk, TurnUsage } from 'claude-code'
 
 const BRIDGE = 'http://127.0.0.1:47130'
-const POLL_MS = 1500
+// Often enough that a stop or a message pressed on the phone lands at once.
+const POLL_MS = 500
 // Sent with every poll, so the bridge can tell a session that still runs an
 // older copy of this mod. Kept equal to .claude-plugin/plugin.json.
-const MOD_VERSION = '0.5.2'
+const MOD_VERSION = '0.5.3'
 const BROWSER_TOOL = 'browser_view'
 
 type UsageReport = {
@@ -25,6 +26,7 @@ type PollReply = {
   prompts?: Array<{ id?: string; text?: string; mode?: string }>
   commands?: Array<{ id?: string; command?: string; args?: string }>
   needCommands?: boolean
+  stop?: boolean
 }
 
 // How a prompt from a device meets a turn that is still running: steer (the
@@ -71,6 +73,17 @@ async function send($: EngineInterface, path: string, body: string): Promise<str
 
 function report($: EngineInterface, usage: UsageReport): Promise<string | null> {
   return send($, '/mod/usage', JSON.stringify(usage))
+}
+
+// Whether the person pressed stop: the running turn ends, as with Esc.
+export function stopAsked(reply: string): boolean {
+  try {
+    const parsed: PollReply = JSON.parse(reply)
+
+    return parsed.stop === true
+  } catch {
+    return false
+  }
 }
 
 // The bridge's reply is its own JSON; only text prompts are taken from it.
@@ -189,6 +202,9 @@ async function poll($: EngineInterface, sessionId: string): Promise<void> {
   const reply = await send($, '/mod/poll', JSON.stringify({ sessionId, mod: MOD_VERSION }))
 
   if (reply === null) return
+
+  // Messages sent before the stop still go next, as after Esc.
+  if (stopAsked(reply) && runningTurn !== null) await $.turn.abort({ turnId: runningTurn }).catch(() => undefined)
 
   for (const prompt of promptsOf(reply)) {
     // With no turn running every mode simply starts one.
