@@ -9,7 +9,7 @@ import { type Config, type Device, hashToken, newToken, VERSION } from './config
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
-import { codexCommand, codexState, setCodexHooks } from './codex.ts'
+import { codexCommand, codexHooksCurrent, type CodexState, codexState, codexTrust, findCodex, setCodexHooks } from './codex.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
@@ -39,6 +39,8 @@ const PAIRING_TTL_MS = 30 * 60_000
 const LAST_SEEN_SAVE_MS = 60_000
 // How long Claude's browser_view call waits for the widget to answer.
 const BROWSER_WAIT_MS = 15_000
+// How long Codex's answer on whether it trusts the hooks is kept.
+const CODEX_CHECK_MS = 60_000
 // How often the installed mod's version is read again.
 const MOD_CHECK_MS = 30_000
 // Claude Code's own commands that run as commands even before a session has
@@ -134,8 +136,11 @@ export type BridgeOptions = {
   commandsPath?: string
   // The installed companion mod's manifest, for its version.
   modManifest?: string
-  // Codex's settings folder (~/.codex), where its hooks.json lives.
+  // Codex's settings folder (~/.codex), where its hooks.json lives. Left out,
+  // the bridge leaves Codex alone (tests must never touch the real one).
   codexHome?: string
+  // How to start Codex's app-server (to trust the hooks); found on the PC by default.
+  codexApp?: string[] | null
   // Names and archive flags; defaults to sessions.json beside the uploads folder.
   metaPath?: string
   // Who is on the tailnet (tests hand in a made-up one).
@@ -301,7 +306,33 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
   store.seedCommands(readCommands(commandsPath))
 
-  const codexHome = options.codexHome ?? join(homedir(), '.codex')
+  const codexHome = options.codexHome ?? null
+  // What Codex runs: this bridge's own Node and hook script.
+  const codexHook = codexCommand(process.execPath, join(dirname(fileURLToPath(import.meta.url)), 'ensure.ts'))
+  let codexApp: string[] | null | undefined = options.codexApp
+  let codexChecked: { at: number; trusted: boolean | null } | null = null
+
+  // Whether Codex trusts ChoiBuddy's hooks (null: not connected, or Codex's
+  // app-server could not be asked). With `trust`, records the trust first.
+  const codexStatus = async (trust: boolean): Promise<CodexState & { trusted: boolean | null }> => {
+    const state = codexHome === null ? { installed: false, connected: false } : codexState(codexHome)
+
+    if (!state.connected) return { ...state, trusted: null }
+    if (!trust && codexChecked !== null && now() - codexChecked.at < CODEX_CHECK_MS) return { ...state, trusted: codexChecked.trusted }
+
+    if (codexApp === undefined) {
+      const exe = findCodex()
+
+      codexApp = exe === null ? null : [exe, 'app-server']
+    }
+
+    const seen = codexApp === null ? null : await codexTrust(codexApp, homedir(), trust)
+    const trusted = seen === null ? null : seen.ours > 0 && seen.trusted === seen.ours
+
+    codexChecked = { at: now(), trusted }
+
+    return { ...state, trusted }
+  }
   const modManifest = options.modManifest ?? join(homedir(), '.claude', 'local-mods', 'choibuddy', '.claude-plugin', 'plugin.json')
   let modReadAt = 0
 
@@ -1207,9 +1238,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       return
     }
 
-    // Codex on this PC: whether it is there and ChoiBuddy's hooks are listed.
+    // Codex on this PC: whether it is there, ChoiBuddy's hooks are listed and
+    // Codex trusts them.
     if (req.method === 'GET' && url.pathname === '/api/codex') {
-      sendJson(res, 200, codexState(codexHome))
+      sendJson(res, 200, await codexStatus(false))
 
       return
     }
@@ -1225,10 +1257,20 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
       const body = await readBody(req, API_BODY_LIMIT)
       const on = bool(body === null ? null : parseJsonObject(body), 'on') ?? false
-      const state = setCodexHooks(codexHome, on ? codexCommand(process.execPath, join(dirname(fileURLToPath(import.meta.url)), 'ensure.ts')) : null)
+      if (codexHome === null) {
+        sendJson(res, 404, { ok: false, error: 'no codex' })
 
-      log(`codex hooks ${on ? 'on' : 'off'}`)
-      sendJson(res, 200, { ok: true, ...state })
+        return
+      }
+
+      setCodexHooks(codexHome, on ? codexHook : null)
+      codexChecked = null
+
+      // Trusted the way Codex's own /hooks screen does it, as the person asked.
+      const status = await codexStatus(on)
+
+      log(`codex hooks ${on ? 'on' : 'off'}${on ? `, trusted ${String(status.trusted)}` : ''}`)
+      sendJson(res, 200, { ok: true, ...status })
 
       return
     }
@@ -1480,6 +1522,14 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   }
 
   log(`bridge ${VERSION} listening on 127.0.0.1:${port}`)
+
+  // Connected to Codex, but this version writes its hooks differently (or
+  // runs from elsewhere): Codex would skip them as changed, so they are
+  // written again and trusted again.
+  if (codexHome !== null && codexState(codexHome).connected && !codexHooksCurrent(codexHome, codexHook)) {
+    setCodexHooks(codexHome, codexHook)
+    void codexStatus(true).then(status => log(`codex hooks updated, trusted ${String(status.trusted)}`))
+  }
 
   const close = async (): Promise<void> => {
     for (const timer of timers) clearInterval(timer)

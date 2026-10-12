@@ -286,8 +286,9 @@ function Guide({ localFeed }: { localFeed: Feed | null }) {
   )
 }
 
-// Codex on this PC: ChoiBuddy lists its hooks in Codex's hooks.json; Codex
-// runs them once the person trusts them in its /hooks screen.
+// Codex on this PC: ChoiBuddy lists its hooks in Codex's hooks.json and has
+// Codex trust them (as its /hooks screen would); Codex picks them up when it
+// starts again.
 function CodexRow({ feed }: { feed: Feed }) {
   const { t } = useI18n()
   const [state, setState] = useState<CodexState | null>(null)
@@ -309,15 +310,24 @@ function CodexRow({ feed }: { feed: Feed }) {
     else setState(next)
   }
 
+  const hint = !state.connected ? t('codex.hint') : state.trusted === true ? t('codex.ready') : t('codex.trust')
+
   return (
     <div className="row codex-row">
       <span className="row-text">
         <span>{t('codex.title')}</span>
-        <span className="row-hint">{state.connected ? t('codex.trust') : t('codex.hint')}</span>
+        <span className={`row-hint ${state.connected && state.trusted === true ? 'good' : ''}`}>{hint}</span>
       </span>
-      <button type="button" className={`btn small ${state.connected ? '' : 'btn--allow'}`} disabled={busy} onClick={() => void change(!state.connected)}>
-        {state.connected ? t('codex.disconnect') : t('codex.connect')}
-      </button>
+      <span className="btn-row">
+        {state.connected && state.trusted !== true && (
+          <button type="button" className="btn small btn--allow" disabled={busy} onClick={() => void change(true)}>
+            {t('codex.retrust')}
+          </button>
+        )}
+        <button type="button" className={`btn small ${state.connected ? '' : 'btn--allow'}`} disabled={busy} onClick={() => void change(!state.connected)}>
+          {state.connected ? t('codex.disconnect') : t('codex.connect')}
+        </button>
+      </span>
     </div>
   )
 }

@@ -27,6 +27,8 @@ test("ChoiBuddy's hooks go into Codex's hooks.json and out again, the person's o
 
   assert.equal(str(permission, 'commandWindows'), COMMAND)
   assert.equal(permission.timeout, 600)
+  // Codex allows its end and interrupt hooks 3 s at most.
+  assert.equal((objects(arr(objects(arr(obj(again, 'hooks'), 'SessionEnd'))[0] ?? {}, 'hooks'))[0] ?? {}).timeout, 3)
 
   const removed = withCodexHooks(again, null)
 
@@ -81,6 +83,7 @@ test('a Codex session shows its steps, asks through the hook script and reads it
     read: () => null,
     modManifest: join(root, 'no-mod.json'),
     codexHome: join(root, 'codex'),
+    codexApp: [process.execPath, '--no-warnings', join(import.meta.dirname, 'fake-codex-app-server.ts'), join(root, 'codex', 'hooks.json'), join(root, 'trust.json')],
   })
   const url = `http://127.0.0.1:${bridge.port}`
   const headers = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
@@ -138,13 +141,42 @@ test('a Codex session shows its steps, asks through the hook script and reads it
       ],
     )
 
-    // Connecting writes the hooks with this bridge's own Node and script.
+    // Connecting writes the hooks with this bridge's own Node and script,
+    // and has Codex's app-server (a stand-in here) trust all ten.
     const connected = parseJsonObject(await (await fetch(`${url}/api/codex`, { method: 'POST', headers, body: JSON.stringify({ on: true }) })).text())
     const file = parseJsonObject(readFileSync(join(root, 'codex', 'hooks.json'), 'utf8'))
+    const trust = parseJsonObject(readFileSync(join(root, 'trust.json'), 'utf8'))
 
     assert.equal(connected?.connected, true)
+    assert.equal(connected?.trusted, true)
+    assert.equal(Object.keys(trust ?? {}).length, 10)
     assert.equal(codexConnected(file), true)
     assert.ok((str(objects(arr(objects(arr(obj(file, 'hooks'), 'Stop'))[0] ?? {}, 'hooks'))[0] ?? {}, 'command') ?? '').includes(process.execPath))
+  } finally {
+    await bridge.close()
+  }
+})
+
+test('a bridge not told where Codex lives leaves Codex alone', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-nocodex-'))
+  const bridge = await startBridge({
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
+    saveConfig: () => {},
+    galleryDir: join(root, 'gallery'),
+    uploadsDir: join(root, 'uploads'),
+    docBackupDir: join(root, 'backups'),
+    claudeDir: join(root, 'claude'),
+    log: () => {},
+    bindTailnet: false,
+    read: () => null,
+    modManifest: join(root, 'no-mod.json'),
+  })
+  const url = `http://127.0.0.1:${bridge.port}`
+  const headers = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+
+  try {
+    assert.deepEqual(parseJsonObject(await (await fetch(`${url}/api/codex`, { headers })).text()), { installed: false, connected: false, trusted: null })
+    assert.equal((await fetch(`${url}/api/codex`, { method: 'POST', headers, body: JSON.stringify({ on: true }) })).status, 404)
   } finally {
     await bridge.close()
   }

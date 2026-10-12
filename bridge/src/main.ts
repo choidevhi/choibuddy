@@ -11,8 +11,10 @@ const config = loadConfig()
 try {
   const claudeDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')
 
-  // CODEX_HOME is Codex's own override for its settings folder.
-  const codexHome = process.env.CODEX_HOME ?? join(homedir(), '.codex')
+  // CODEX_HOME is Codex's own override for its settings folder. A bridge
+  // started with a home of its own (a demo, screenshots) leaves the
+  // person's Codex alone unless given one.
+  const codexHome = process.env.CODEX_HOME ?? (process.env.CHOIBUDDY_HOME === undefined ? join(homedir(), '.codex') : undefined)
 
   await startBridge({ config, saveConfig, log, galleryDir: join(HOME_DIR, 'gallery'), uploadsDir: join(HOME_DIR, 'uploads'), docBackupDir: join(HOME_DIR, 'doc-backups'), claudeDir, codexHome })
 } catch (error) {

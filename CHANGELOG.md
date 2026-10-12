@@ -1,5 +1,11 @@
 # 변경 기록
 
+## 0.6.6 (2026-10-12)
+
+- Codex 훅을 자동으로 신뢰해요. "Codex 연결"을 누르면 훅을 넣고, Codex 자체 app-server로 `/hooks` 화면과 같은 방법(`hooks/list` → `config/batchWrite`)으로 ChoiBuddy 훅을 신뢰해 둬요. 신뢰 값(해시)은 Codex가 직접 계산해서 Codex 버전이 바뀌어도 맞아요. 설정에 "연결됐어요" 또는 "신뢰하기" 버튼이 보여요.
+- 업데이트로 훅 내용이 바뀌면(이번처럼 끝·중단 훅 시간 제한 3초), 연결된 PC의 브리지가 시작할 때 다시 쓰고 다시 신뢰해요. Codex가 바뀐 훅을 건너뛰지 않아요.
+- 시험용 브리지(테스트, 화면 캡처)는 Codex 폴더를 따로 받지 않으면 Codex를 건드리지 않아요.
+
 ## 0.6.5 (2026-10-12)
 
 - Codex 연결(베타). ＋ 탭의 "Codex 연결"을 누르면 이 PC의 `~/.codex/hooks.json`에 ChoiBuddy 훅을 넣어요(내 훅은 그대로, 전 파일은 `hooks.json.bak`). Codex의 `/hooks`에서 한 번 신뢰하고 Codex를 다시 시작하면 연결돼요.
