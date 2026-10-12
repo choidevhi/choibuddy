@@ -61,13 +61,14 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 You need:
 
 - Claude Code
-- Node.js 24 or later on the PATH (the bridge runs on Node)
-- [Tailscale](https://tailscale.com) on the PC and the phone, for the phone or other PCs
+- [Tailscale](https://tailscale.com) on the PC and the phone, for the phone or other PCs. The apps put it there for you: **Install** in the **＋** tab runs winget on Windows and opens the Play Store on the phone. You only sign in.
+
+Nothing else: the Windows app brings its own Node.js 24 for the bridge and Claude Code's hooks, so no Node install is needed.
 
 Steps:
 
 1. **Windows app.** Install `ChoiBuddy_<version>_x64-setup.exe` and press **Connect to Claude Code**.
-   - It copies the bridge to `~/.choibuddy/app` and adds hooks to `~/.claude/settings.json`. The original file is backed up first as `settings.json.choibuddy-backup-<time>`.
+   - It copies the bridge and the app's Node.js to `~/.choibuddy/app` and adds hooks to `~/.claude/settings.json`. The original file is backed up first as `settings.json.choibuddy-backup-<time>`.
    - It also installs the companion mod. Run `/reload-plugins` once in Claude Code sessions that were already open.
    - The installer is not code-signed. If SmartScreen warns, choose **More info → Run anyway**.
 2. **Phone.**
@@ -76,7 +77,7 @@ Steps:
    - The PC and the phone must both be signed in to Tailscale.
 3. **Other PCs.** Install ChoiBuddy there as well, create a pairing code on that PC, and paste its link into **Other PCs** on this one. A phone scans one QR per PC.
 
-Without the Windows app, from a clone of this repository:
+Without the Windows app, from a clone of this repository (needs Node.js 24 or later; the bridge keeps a copy of the Node that installed it):
 
 ```
 corepack pnpm install
@@ -126,7 +127,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 corepack pnpm test         # bridge tests
 corepack pnpm typecheck    # bridge and screens
 corepack pnpm build        # screens (ui/dist)
-corepack pnpm tauri build  # Windows installer
+corepack pnpm tauri build  # Windows installer (first fetches Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JDK 21 in JAVA_HOME
@@ -136,4 +137,4 @@ To look at the screens without real work, start a bridge on a spare port with `C
 
 ## License
 
-The code is under the [MIT License](LICENSE). The ChoiBuddy character artwork (the buddy drawings, app icons and promo images) is not covered by it; see [ARTWORK.md](ARTWORK.md).
+The code is under the [MIT License](LICENSE). The Windows app ships Node.js, which has its own license (installed next to it as `runtime/LICENSE`). The ChoiBuddy character artwork (the buddy drawings, app icons and promo images) is not covered by it; see [ARTWORK.md](ARTWORK.md).

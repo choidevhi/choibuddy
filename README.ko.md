@@ -61,13 +61,14 @@ Claude Code ──훅(HTTP)──────▶ 브리지(Node, PC) ──SSE�
 필요한 것:
 
 - Claude Code
-- PATH에 Node.js 24 이상(브리지가 Node로 돌아요)
-- 휴대폰이나 다른 PC를 쓸 때는 PC와 휴대폰 모두 [Tailscale](https://tailscale.com)
+- 휴대폰이나 다른 PC를 쓸 때는 PC와 휴대폰 모두 [Tailscale](https://tailscale.com). 앱이 설치해 줘요: **＋** 탭의 **설치**를 누르면 윈도우는 winget으로 설치하고, 휴대폰은 Play 스토어를 열어요. 로그인만 하면 돼요.
+
+그 밖에는 없어요. 윈도우 앱에 Node.js 24가 들어 있어서 브리지와 Claude Code 훅이 그걸로 돌아가요. Node를 따로 설치하지 않아도 돼요.
 
 순서:
 
 1. **윈도우 앱.** `ChoiBuddy_<버전>_x64-setup.exe`를 설치하고 **Claude Code에 연결**을 눌러요.
-   - 브리지를 `~/.choibuddy/app`에 복사하고 `~/.claude/settings.json`에 훅을 추가해요. 원래 파일은 `settings.json.choibuddy-backup-<시각>`으로 먼저 백업돼요.
+   - 브리지와 앱의 Node.js를 `~/.choibuddy/app`에 복사하고 `~/.claude/settings.json`에 훅을 추가해요. 원래 파일은 `settings.json.choibuddy-backup-<시각>`으로 먼저 백업돼요.
    - 동반 mod도 설치해요. 이미 열려 있던 Claude Code 세션에서는 `/reload-plugins`를 한 번 실행하세요.
    - 설치 파일에 코드 서명이 없어요. SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누르세요.
 2. **휴대폰.**
@@ -76,7 +77,7 @@ Claude Code ──훅(HTTP)──────▶ 브리지(Node, PC) ──SSE�
    - PC와 휴대폰 모두 Tailscale에 로그인돼 있어야 해요.
 3. **다른 PC.** 그 PC에도 설치하고, 거기서 만든 연결 링크를 이 PC 앱의 **다른 PC**에 붙여 넣어요. 휴대폰은 PC마다 QR을 하나씩 찍어요.
 
-윈도우 앱 없이 이 저장소를 받아서 할 때:
+윈도우 앱 없이 이 저장소를 받아서 할 때(Node.js 24 이상 필요, 브리지는 설치에 쓴 Node를 복사해 두고 써요):
 
 ```
 corepack pnpm install
@@ -126,7 +127,7 @@ corepack pnpm uninstall-bridge   # 훅을 지우고 브리지를 멈춤
 corepack pnpm test         # 브리지 테스트
 corepack pnpm typecheck    # 브리지 + 화면 타입 검사
 corepack pnpm build        # 화면 빌드 (ui/dist)
-corepack pnpm tauri build  # 윈도우 설치 파일
+corepack pnpm tauri build  # 윈도우 설치 파일 (먼저 Node.js를 windows/src-tauri/runtime에 받아 고정된 SHA-256으로 확인)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JAVA_HOME은 JDK 21
@@ -136,4 +137,4 @@ cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRe
 
 ## 라이선스
 
-코드는 [MIT 라이선스](LICENSE)예요. ChoiBuddy 캐릭터 그림(버디 그림, 앱 아이콘, 홍보 이미지)은 MIT에 포함되지 않아요. 자세한 내용은 [ARTWORK.md](ARTWORK.md)를 보세요.
+코드는 [MIT 라이선스](LICENSE)예요. 윈도우 앱에 들어 있는 Node.js는 자체 라이선스를 따르고, 앱 옆 `runtime/LICENSE`에 함께 설치돼요. ChoiBuddy 캐릭터 그림(버디 그림, 앱 아이콘, 홍보 이미지)은 MIT에 포함되지 않아요. 자세한 내용은 [ARTWORK.md](ARTWORK.md)를 보세요.

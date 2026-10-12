@@ -13,6 +13,11 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Tailscale 앱이 깔려 있는지 보고 열기 위해(Android 11 이상의 패키지 공개 범위). -->
+    <queries>
+        <package android:name="com.tailscale.ipn" />
+    </queries>
+
     <!-- allowBackup=false라 Android 11 이하는 백업이 아예 없다. 12 이상은 dataExtractionRules가 토큰을 뺀다. -->
     <application
         android:allowBackup="false"

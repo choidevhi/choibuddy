@@ -1,6 +1,7 @@
 mod bridge;
 mod browser;
 mod float;
+mod tailscale;
 
 use float::FloatState;
 use tauri::menu::{Menu, MenuItem};
@@ -39,9 +40,18 @@ fn connection() -> String {
     bridge::connection_json(&bridge::home())
 }
 
+/// The Node this app ships with, when the bundle has one.
+fn bundled_node(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().resource_dir().ok().map(|dir| bridge::bundled_node(&dir))
+}
+
 #[tauri::command]
-async fn start_bridge() -> bool {
-    tauri::async_runtime::spawn_blocking(|| bridge::ensure(&bridge::home())).await.unwrap_or(false)
+async fn start_bridge(app: AppHandle) -> bool {
+    let bundled = bundled_node(&app);
+
+    tauri::async_runtime::spawn_blocking(move || bridge::ensure(&bridge::home(), bundled.as_deref()))
+        .await
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -49,10 +59,32 @@ async fn install_bridge(app: AppHandle) -> bool {
     let Ok(resources) = app.path().resource_dir() else {
         return false;
     };
+    let bundled = bridge::bundled_node(&resources);
 
-    tauri::async_runtime::spawn_blocking(move || bridge::install(&resources) && bridge::ensure(&bridge::home()))
+    tauri::async_runtime::spawn_blocking(move || bridge::install(&resources) && bridge::ensure(&bridge::home(), Some(&bundled)))
         .await
         .unwrap_or(false)
+}
+
+/// "installed" or "missing"; whether it is signed in shows in the bridge's
+/// tailnet address.
+#[tauri::command]
+fn tailscale_state() -> &'static str {
+    if tailscale::installed() {
+        "installed"
+    } else {
+        "missing"
+    }
+}
+
+#[tauri::command]
+async fn install_tailscale() -> bool {
+    tauri::async_runtime::spawn_blocking(tailscale::install).await.unwrap_or(false)
+}
+
+#[tauri::command]
+fn open_tailscale() -> bool {
+    tailscale::open()
 }
 
 #[tauri::command]
@@ -148,6 +180,9 @@ pub fn run() {
             connection,
             start_bridge,
             install_bridge,
+            tailscale_state,
+            install_tailscale,
+            open_tailscale,
             set_always_on_top,
             hide_window,
             minimize_window,
@@ -222,7 +257,9 @@ pub fn run() {
                 show(app.handle());
             }
 
-            std::thread::spawn(|| bridge::ensure(&bridge::home()));
+            let bundled = bundled_node(app.handle());
+
+            std::thread::spawn(move || bridge::ensure(&bridge::home(), bundled.as_deref()));
 
             Ok(())
         })

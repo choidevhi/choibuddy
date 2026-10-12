@@ -65,7 +65,10 @@ function PairingManager({ feed, onSourcesChanged }: { feed: Feed; onSourcesChang
     <div className="card pairing-card">
       <div className="card-title">{t('connect.phone')}</div>
       {tailnetUrl === null ? (
-        <div className="row-hint">{t('connect.tailscaleOff')}</div>
+        <>
+          <div className="row-hint">{t('connect.tailscaleOff')}</div>
+          <TailscaleRow />
+        </>
       ) : link === null ? (
         <>
           <div className="row-hint">{t('connect.codeHint')}</div>
@@ -143,6 +146,85 @@ function PairingManager({ feed, onSourcesChanged }: { feed: Feed; onSourcesChang
   )
 }
 
+type TailscaleState = 'installed' | 'missing' | 'installing'
+
+function phoneTailscale(): TailscaleState | null {
+  const installed = window.ChoiBuddyNative?.tailscaleInstalled?.()
+
+  return installed === undefined ? null : installed ? 'installed' : 'missing'
+}
+
+// The phone and other PCs reach this PC through Tailscale. Puts it on this
+// device in one tap (winget on Windows, the Play Store on the phone);
+// signing in stays in Tailscale's own window or app.
+function TailscaleRow() {
+  const { t } = useI18n()
+  const [state, setState] = useState<TailscaleState | null>(platform === 'android' ? phoneTailscale() : null)
+
+  useEffect(() => {
+    if (platform === 'windows') void windowsShell.tailscaleState().then(setState)
+    if (platform !== 'android') return
+
+    // Back from the Play Store: look again.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') setState(phoneTailscale())
+    }
+
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
+  if (state === null) return null
+
+  const install = async (): Promise<void> => {
+    if (platform === 'android') {
+      window.ChoiBuddyNative?.openTailscale?.()
+
+      return
+    }
+
+    setState('installing')
+
+    const ok = await windowsShell.installTailscale().catch(() => false)
+
+    if (!ok) showToast(t('tailscale.installFailed'))
+    setState(ok ? 'installed' : await windowsShell.tailscaleState().catch(() => 'missing' as const))
+  }
+
+  const open = (): void => {
+    if (platform === 'android') window.ChoiBuddyNative?.openTailscale?.()
+    else void windowsShell.openTailscale()
+  }
+
+  const hint =
+    state === 'installing'
+      ? t('tailscale.installing')
+      : state === 'missing'
+        ? t('tailscale.missing')
+        : platform === 'android'
+          ? t('tailscale.signInPhone')
+          : t('tailscale.signInPc')
+
+  return (
+    <div className="row">
+      <span className="row-text">
+        <span>Tailscale</span>
+        <span className="row-hint">{hint}</span>
+      </span>
+      {state === 'installed' ? (
+        <button type="button" className="btn small" onClick={open}>
+          {t('tailscale.open')}
+        </button>
+      ) : (
+        <button type="button" className="btn small btn--allow" disabled={state === 'installing'} onClick={() => void install()}>
+          {t('tailscale.install')}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // Step-by-step pairing, with this PC's Claude Code wiring checked live.
 function Guide({ localFeed }: { localFeed: Feed | null }) {
   const { t } = useI18n()
@@ -166,6 +248,7 @@ function Guide({ localFeed }: { localFeed: Feed | null }) {
           <li key={step}>{step}</li>
         ))}
       </ol>
+      {platform === 'android' && <TailscaleRow />}
       {setup !== null && (
         <>
           <div className="row">

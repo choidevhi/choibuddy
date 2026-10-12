@@ -24,6 +24,10 @@ interface ChoiBuddyNativeApi {
   // Added in 0.5.5: asks the launcher to place the home-screen widget. False
   // when the launcher cannot, so the person adds it from the widget list.
   pinWidget?(): boolean
+  // Added in 0.5.8: whether the Tailscale app is installed, and opening it
+  // (or its Play Store page when it is not).
+  tailscaleInstalled?(): boolean
+  openTailscale?(): void
 }
 
 interface Window {

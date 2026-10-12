@@ -62,9 +62,11 @@ export function withoutOurHooks(hooks: JsonObject): JsonObject {
   return out
 }
 
-export function withOurHooks(hooks: JsonObject, port: number, ensurePath: string): JsonObject {
+// `nodePath` is ChoiBuddy's own Node (see install.ts), named in full so the
+// hooks work without a Node on the PATH.
+export function withOurHooks(hooks: JsonObject, port: number, ensurePath: string, nodePath: string): JsonObject {
   const out = withoutOurHooks(hooks)
-  const command = `node --no-warnings "${ensurePath.replaceAll('\\', '/')}" --forward`
+  const command = `"${nodePath.replaceAll('\\', '/')}" --no-warnings "${ensurePath.replaceAll('\\', '/')}" --forward`
   const add = (event: string, hook: JsonObject): void => {
     const groups = out[event]
 

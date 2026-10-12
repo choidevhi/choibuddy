@@ -1,11 +1,12 @@
 {
   "name": "choibuddy",
   "private": true,
-  "version": "0.5.7",
+  "version": "0.5.8",
   "type": "module",
   "scripts": {
     "dev": "vite --config ui/vite.config.ts",
     "build": "vite build --config ui/vite.config.ts",
+    "fetch-node": "node scripts/fetch-node.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p ui/tsconfig.json",
     "test": "node --no-warnings --test bridge/test/*.test.ts",
     "bridge": "node --no-warnings bridge/src/main.ts",

@@ -129,10 +129,15 @@ test('the terminal answering first releases the held hook', async () => {
 
 test('settings hooks are added once and removed without touching other hooks', () => {
   const mine = { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] }
-  const once = withOurHooks(mine, 47130, 'C:\\Users\\me\\.choibuddy\\app\\bridge\\src\\ensure.ts')
-  const twice = withOurHooks(once, 47130, 'C:\\Users\\me\\.choibuddy\\app\\bridge\\src\\ensure.ts')
+  const ensure = 'C:\\Users\\me\\.choibuddy\\app\\bridge\\src\\ensure.ts'
+  const node = 'C:\\Users\\me\\.choibuddy\\app\\node\\node.exe'
+  const once = withOurHooks(mine, 47130, ensure, node)
+  const twice = withOurHooks(once, 47130, ensure, node)
+  const start = objects(arr(objects(arr(once, 'SessionStart'))[0] ?? {}, 'hooks'))[0]
 
   assert.deepEqual(twice, once)
+  // The hook names ChoiBuddy's own Node in full: no Node on the PATH needed.
+  assert.equal(str(start ?? {}, 'command'), '"C:/Users/me/.choibuddy/app/node/node.exe" --no-warnings "C:/Users/me/.choibuddy/app/bridge/src/ensure.ts" --forward')
   assert.equal(Array.isArray(once.UserPromptSubmit) ? once.UserPromptSubmit.length : 0, 2)
   assert.ok(Array.isArray(once.PermissionRequest))
   assert.deepEqual(withoutOurHooks(once), mine)

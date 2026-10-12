@@ -1,11 +1,13 @@
-// Installs the bridge into ~/.choibuddy/app, wires Claude Code's hooks to it
-// in ~/.claude/settings.json (backed up first) and installs the companion mod
-// (usage figures, prompts from the widget) into ~/.claude/local-mods.
+// Installs the bridge into ~/.choibuddy/app, with a Node of its own to run
+// on, wires Claude Code's hooks to it in ~/.claude/settings.json (backed up
+// first) and installs the companion mod (usage figures, prompts from the
+// widget) into ~/.claude/local-mods.
 // `--uninstall` removes the hooks and the mod again and stops the bridge.
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONFIG_PATH, HOME_DIR, loadConfig } from './config.ts'
 import { arr, asObject, type JsonObject, objects, parseJsonObject, str } from './json.ts'
@@ -32,6 +34,38 @@ function copyApp(): string {
   copyFileSync(join(SOURCE_ROOT, 'shared', 'protocol.ts'), join(sharedOut, 'protocol.ts'))
 
   return join(bridgeOut, 'ensure.ts')
+}
+
+function sameFile(a: string, b: string): boolean {
+  if (statSync(a).size !== statSync(b).size) return false
+
+  const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex')
+
+  return digest(a) === digest(b)
+}
+
+// The bridge and the hooks run on a Node of their own: a copy of the one
+// running this installer (the Node the Windows app ships with, or yours when
+// installing from a clone). So nobody needs Node on the PATH, and updating or
+// removing another Node can't break Claude Code's hooks.
+function copyNode(): string {
+  const dir = join(APP_DIR, 'node')
+  const target = join(dir, basename(process.execPath))
+
+  mkdirSync(dir, { recursive: true })
+
+  // Copies set aside last time while they were still running.
+  for (const file of readdirSync(dir)) {
+    if (file.startsWith(`${basename(target)}.old-`)) rmSync(join(dir, file), { force: true })
+  }
+
+  if (process.execPath === target || (existsSync(target) && sameFile(target, process.execPath))) return target
+
+  // A running node.exe can't be overwritten on Windows, but it can be moved.
+  if (existsSync(target)) renameSync(target, `${target}.old-${Date.now()}`)
+  copyFileSync(process.execPath, target)
+
+  return target
 }
 
 function claude(args: string[]): boolean {
@@ -120,12 +154,13 @@ async function main(): Promise<void> {
   }
 
   const ensurePath = copyApp()
+  const nodePath = copyNode()
 
-  writeSettings({ ...settings, hooks: withOurHooks(hooks, config.port, ensurePath) })
+  writeSettings({ ...settings, hooks: withOurHooks(hooks, config.port, ensurePath, nodePath) })
 
   const modInstalled = installMod()
 
-  const started = spawnSync(process.execPath, ['--no-warnings', ensurePath], { stdio: 'inherit' })
+  const started = spawnSync(nodePath, ['--no-warnings', ensurePath], { stdio: 'inherit' })
   const health = await fetch(`http://127.0.0.1:${config.port}/api/health`).then(
     res => res.ok,
     () => false,
@@ -135,7 +170,7 @@ async function main(): Promise<void> {
     : null
   const tailnetUrl = str(asObject(snapshot?.server), 'tailnetUrl')
 
-  console.log(`설치 위치: ${APP_DIR}`)
+  console.log(`설치 위치: ${APP_DIR} (Node ${process.version})`)
   console.log(`설정 파일: ${SETTINGS_PATH} (백업 후 훅 추가)`)
   console.log(`토큰 파일: ${CONFIG_PATH}`)
   console.log(`브리지: ${health ? '실행 중' : `시작 실패 (종료 코드 ${started.status})`}`)

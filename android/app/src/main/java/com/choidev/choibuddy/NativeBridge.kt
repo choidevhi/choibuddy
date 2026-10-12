@@ -72,6 +72,14 @@ class NativeBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun clipboardImage(): String = Photos.fromClipboard(activity) ?: "null"
 
+    /** Tailscale 앱이 깔려 있으면 true. 휴대폰은 Tailscale로 PC에 닿는다. */
+    @JavascriptInterface
+    fun tailscaleInstalled(): Boolean = Tailscale.installed(activity)
+
+    /** Tailscale을 연다. 없으면 Play 스토어의 Tailscale 페이지를 연다. */
+    @JavascriptInterface
+    fun openTailscale() = activity.runOnUiThread { Tailscale.open(activity) }
+
     /** 런처에 홈 화면 위젯을 놓아 달라고 한다. 런처가 못 하면 false이고, UI가 위젯 목록에서 고르라고 안내한다. */
     @JavascriptInterface
     fun pinWidget(): Boolean {

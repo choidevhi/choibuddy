@@ -70,8 +70,24 @@ pub fn is_up(port: u16) -> bool {
     response.contains("\"name\":\"choibuddy\"")
 }
 
-fn node() -> Command {
-    let mut command = Command::new("node");
+/// The Node the installer copied next to the bridge (the hooks use the same).
+pub fn installed_node(home: &Path) -> PathBuf {
+    home.join("app").join("node").join("node.exe")
+}
+
+/// The Node this app ships with, so nobody needs one of their own.
+pub fn bundled_node(resource_dir: &Path) -> PathBuf {
+    resource_dir.join("runtime").join("node.exe")
+}
+
+/// The first of `candidates` that exists, else `node` from the PATH (a bridge
+/// installed by an older version, or from a clone).
+fn node_program(candidates: &[PathBuf]) -> PathBuf {
+    candidates.iter().find(|path| path.is_file()).cloned().unwrap_or_else(|| PathBuf::from("node"))
+}
+
+fn node(candidates: &[PathBuf]) -> Command {
+    let mut command = Command::new(node_program(candidates));
 
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     command
@@ -79,8 +95,9 @@ fn node() -> Command {
 
 /// Starts the installed bridge when it is not answering. Spawned from this
 /// app it lives outside any Claude Code process, so it keeps running after
-/// sessions end.
-pub fn ensure(home: &Path) -> bool {
+/// sessions end. `bundled` is this app's own Node, used when the installed
+/// copy is missing.
+pub fn ensure(home: &Path, bundled: Option<&Path>) -> bool {
     let Some(config) = read_config(home) else {
         return false;
     };
@@ -95,7 +112,11 @@ pub fn ensure(home: &Path) -> bool {
         return false;
     }
 
-    let spawned = node()
+    let mut candidates = vec![installed_node(home)];
+
+    candidates.extend(bundled.map(Path::to_path_buf));
+
+    let spawned = node(&candidates)
         .arg("--no-warnings")
         .arg(&main)
         .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
@@ -117,12 +138,13 @@ pub fn ensure(home: &Path) -> bool {
     false
 }
 
-/// Runs the bundled installer: copies the bridge into ~/.choibuddy and adds
-/// the hooks to ~/.claude/settings.json (it backs the file up first).
+/// Runs the bundled installer with the bundled Node: copies the bridge and
+/// that Node into ~/.choibuddy and adds the hooks to ~/.claude/settings.json
+/// (it backs the file up first).
 pub fn install(resource_dir: &Path) -> bool {
     let script = resource_dir.join("bridge").join("src").join("install.ts");
 
-    node()
+    node(&[bundled_node(resource_dir)])
         .arg("--no-warnings")
         .arg(script)
         .creation_flags(CREATE_NO_WINDOW)
@@ -154,6 +176,23 @@ mod tests {
 
         std::fs::write(dir.path().join("config.json"), r#"{ "port": 47130, "token": "short" }"#).unwrap();
         assert_eq!(connection_json(dir.path()), "null");
+    }
+
+    #[test]
+    fn runs_the_first_node_that_exists_else_the_one_on_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = installed_node(dir.path());
+        let bundled = dir.path().join("runtime").join("node.exe");
+
+        assert_eq!(node_program(&[installed.clone(), bundled.clone()]), PathBuf::from("node"));
+
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::write(&bundled, b"").unwrap();
+        assert_eq!(node_program(&[installed.clone(), bundled.clone()]), bundled);
+
+        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::fs::write(&installed, b"").unwrap();
+        assert_eq!(node_program(&[installed.clone(), bundled]), installed);
     }
 
     #[test]

@@ -2,6 +2,8 @@ node_modules/
 ui/dist/
 windows/src-tauri/target/
 windows/src-tauri/gen/
+# The Node.js the Windows app ships with (scripts/fetch-node.mjs).
+windows/src-tauri/runtime/
 android/.gradle/
 android/build/
 android/app/build/
