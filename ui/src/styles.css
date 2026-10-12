@@ -4307,3 +4307,12 @@ body.resizing--column {
   align-items: center;
   gap: 6px;
 }
+
+.mod-notice-close {
+  flex: none;
+  opacity: 0.6;
+}
+
+.mod-notice-close:hover {
+  opacity: 1;
+}

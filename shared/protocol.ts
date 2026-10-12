@@ -229,6 +229,10 @@ export type PromptMode = 'steer' | 'queue' | 'interrupt'
 
 export const PROMPT_MODES = ['steer', 'queue', 'interrupt'] as const satisfies readonly PromptMode[]
 
+// The choices a person has. A bridge sends "steer" as "interrupt" (send now,
+// as Claude Code's Ctrl+Enter does), so the two are one choice.
+export const PICKED_MODES = ['steer', 'queue'] as const satisfies readonly PromptMode[]
+
 export type QueuedItem = {
   text: string
   mode: PromptMode | 'command'

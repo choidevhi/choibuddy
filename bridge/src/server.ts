@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { homedir, hostname, networkInterfaces } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, DEFAULT_PORT, type HistoryEntry, type LiveStream, type Project, PROMPT_MODES, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
+import { type Alert, type BrowserRequest, type CommandInfo, type Decision, type DecisionBehavior, DEFAULT_PORT, type HistoryEntry, type LiveStream, type Project, type PromptMode, type ServerInfo } from '../../shared/protocol.ts'
 import { type Config, type Device, hashToken, newToken, VERSION } from './config.ts'
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
@@ -1163,12 +1163,16 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       }
 
       const requestedMode = str(parsed, 'mode') ?? ''
+      // "Steer in" stops the running turn and sends at once, as Claude Code's
+      // send-now (Ctrl+Enter) does: waiting for the running tool to end felt
+      // like nothing happened. Apps that still send "steer" get the same.
+      const mode: PromptMode = requestedMode === 'queue' ? 'queue' : 'interrupt'
       const term = store.terminalOf(sessionId)
 
       // A session in one of this PC's terminals (Codex) takes it typed in,
-      // its own slash commands too; "stop and send" presses Esc first.
+      // its own slash commands too; sending now presses Esc first.
       if (term !== undefined) {
-        const typed = terminals.type(term, text, requestedMode === 'interrupt')
+        const typed = terminals.type(term, text, mode === 'interrupt')
 
         if (typed) sendUploads(sessionId, text)
         log(`prompt typed into terminal ${term} for ${sessionId}: ${typed ? 'ok' : 'gone'}`)
@@ -1181,7 +1185,6 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       // anything else (also "/" followed by an unknown name) is a prompt.
       const slash = parseSlash(text)
       const known = slash !== null && (ALWAYS_COMMANDS.has(slash.command) || store.commandsFor(sessionId).some(command => command.name === slash.command))
-      const mode: PromptMode = PROMPT_MODES.find(item => item === requestedMode) ?? 'steer'
       const result = slash !== null && known ? store.queueCommand(sessionId, slash.command, slash.args) : store.queuePrompt(sessionId, text, mode)
 
       if (result === 'queued') sendUploads(sessionId, text)

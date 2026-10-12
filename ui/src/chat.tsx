@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
+import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type LiveStream, PICKED_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
 import { BrowserPane } from './browser.tsx'
 import { Buddy, type Tone } from './buddy.tsx'
@@ -58,6 +58,31 @@ export type CommandsFn = (sessionId: string) => Promise<CommandInfo[]>
 
 // Sends a prompt; `mode` overrides the setting for this one message.
 export type SendFn = (sessionId: string, text: string, mode?: PromptMode) => Promise<boolean>
+
+// Sessions whose "older mod" notice was closed, on this device.
+const NOTICE_KEY = 'choibuddy.modNoticeClosed'
+const NOTICES_KEPT = 100
+
+function readClosedNotices(): string[] {
+  try {
+    const stored: string[] | null = JSON.parse(localStorage.getItem(NOTICE_KEY) ?? 'null')
+
+    return Array.isArray(stored) ? stored : []
+  } catch {
+    return []
+  }
+}
+
+const closedNotices = new Set(readClosedNotices())
+
+function closeNotice(sessionId: string): void {
+  closedNotices.add(sessionId)
+  try {
+    localStorage.setItem(NOTICE_KEY, JSON.stringify([...closedNotices].slice(-NOTICES_KEPT)))
+  } catch {
+    // Closed for now; the next start shows it again.
+  }
+}
 
 const MODE_LABEL = {
   steer: 'mode.steer',
@@ -134,7 +159,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
   const [highlight, setHighlight] = useState(0)
   const [dismissed, setDismissed] = useState(false)
   // How this message meets a running turn; starts from the setting.
-  const [mode, setMode] = useState<PromptMode>(() => readPref('promptMode', PROMPT_MODES, 'steer'))
+  const [mode, setMode] = useState<PromptMode>(() => readPref('promptMode', PICKED_MODES, 'steer'))
   const picker = useRef<HTMLInputElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const ready = session !== null && session.status !== 'ended' && session.canPrompt
@@ -252,7 +277,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
       setFiles([])
       keep('', [])
       setDismissed(false)
-      setMode(readPref('promptMode', PROMPT_MODES, 'steer'))
+      setMode(readPref('promptMode', PICKED_MODES, 'steer'))
       onSent?.(sentText, sentMode)
     }
   }
@@ -335,7 +360,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
             className="composer-mode-select"
             value={mode}
             title={t('settings.promptMode')}
-            options={PROMPT_MODES.map(item => ({ value: item, label: t(MODE_LABEL[item]) }))}
+            options={PICKED_MODES.map(item => ({ value: item, label: t(MODE_LABEL[item]) }))}
             onChange={setMode}
           />
         </div>
@@ -469,6 +494,8 @@ function ConversationPane(props: PaneProps) {
   const { t } = useI18n()
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [missing, setMissing] = useState(false)
+  // The session whose "older mod" notice was just closed here.
+  const [closedFor, setClosedFor] = useState<string | null>(null)
   // Where the shown part of the conversation starts. Once set, refreshes
   // ask from there, so new messages are added and none slide off the top.
   const [from, setFrom] = useState<number | null>(null)
@@ -878,7 +905,7 @@ function ConversationPane(props: PaneProps) {
       </div>
 
       <div className="convo-foot">
-        {live?.modOutdated === true && feed !== null && (
+        {live?.modOutdated === true && feed !== null && closedFor !== live.id && !closedNotices.has(live.id) && (
           <div className="mod-notice">
             <span className="mod-notice-text">{reloading ? t('mod.reloading') : reloadUnanswered ? t('mod.reloadByHand') : t('mod.outdated')}</span>
             {!reloading && !reloadUnanswered && (
@@ -890,6 +917,18 @@ function ConversationPane(props: PaneProps) {
                 {t('menu.reload')}
               </button>
             )}
+            <button
+              type="button"
+              className="icon-btn mod-notice-close"
+              title={t('action.close')}
+              aria-label={t('action.close')}
+              onClick={() => {
+                closeNotice(live.id)
+                setClosedFor(live.id)
+              }}
+            >
+              <XIcon size={14} />
+            </button>
           </div>
         )}
         {entry !== null && (

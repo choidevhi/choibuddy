@@ -1,6 +1,6 @@
 import { listen } from '@tauri-apps/api/event'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type Alert, type BrowserRequest, type CommandInfo, type Decision, PROMPT_MODES, type PromptMode, type Session } from '../../shared/protocol.ts'
+import { type Alert, type BrowserRequest, type CommandInfo, type Decision, PICKED_MODES, type PromptMode, type Session } from '../../shared/protocol.ts'
 import { answerBrowserRequest, BrowserTab } from './browser.tsx'
 import { type TermRequest, TerminalTab, useTerminalRequests } from './terminal.tsx'
 import { type Feed, feedFor, loadSources, merge, type PcSession, type Source, useFeeds } from './feeds.ts'
@@ -327,7 +327,7 @@ export function App() {
     if (target === null) return false
 
     // Read now: the setting may have changed in this window since mount.
-    const result = await sendPrompt(target.connection, sessionId, text, mode ?? readPref('promptMode', PROMPT_MODES, 'steer'))
+    const result = await sendPrompt(target.connection, sessionId, text, mode ?? readPref('promptMode', PICKED_MODES, 'steer'))
 
     setToast(result === 'queued' ? t('toast.promptQueued') : result === 'no-mod' ? t('toast.promptNoMod') : t('toast.promptFailed'))
 

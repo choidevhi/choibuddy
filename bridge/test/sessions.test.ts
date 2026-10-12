@@ -186,6 +186,23 @@ test('stop reaches a mod that can stop with its next poll, once; an older mod is
   })
 })
 
+test('a prompt sent "steer" (or with no mode) goes to the mod as send now; "queue" waits', async () => {
+  await withBridge({}, async ({ url }) => {
+    await hook(url, { hook_event_name: 'SessionStart', session_id: 'live-1', source: 'startup' })
+    await api(url, '/mod/poll', { sessionId: 'live-1', mod: '0.5.3' }, {})
+    assert.equal((await api(url, '/api/prompt', { sessionId: 'live-1', text: '색을 파랑으로', mode: 'steer' })).status, 200)
+    assert.equal((await api(url, '/api/prompt', { sessionId: 'live-1', text: '이것도' })).status, 200)
+    assert.equal((await api(url, '/api/prompt', { sessionId: 'live-1', text: '끝나면 커밋해', mode: 'queue' })).status, 200)
+
+    const polled = (await api(url, '/mod/poll', { sessionId: 'live-1', mod: '0.5.3' }, {})).json
+
+    assert.deepEqual(
+      objects(arr(polled, 'prompts')).map(prompt => `${str(prompt, 'mode')}:${str(prompt, 'text')}`),
+      ['interrupt:색을 파랑으로', 'interrupt:이것도', 'queue:끝나면 커밋해'],
+    )
+  })
+})
+
 test('other PCs of the same account with a bridge are found; phones, strangers and this PC are not', async () => {
   const health = {
     'http://100.88.0.3:47130': { pcId: 'pc-laptop', version: '0.5.9', trustTailnet: true },

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { renderSVG } from 'uqr'
-import { type DeviceInfo, pairingLink, PROMPT_MODES, type PromptMode } from '../../shared/protocol.ts'
+import { type DeviceInfo, pairingLink, PICKED_MODES, type PromptMode } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
 import { showToast } from './confirm.tsx'
 import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
@@ -721,7 +721,7 @@ const MODE_OPTION = {
 
 export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourcesChanged, update, onUpdate }: ConnectProps) {
   const { lang, t } = useI18n()
-  const [promptMode, setPromptMode] = usePref<PromptMode>('promptMode', PROMPT_MODES, 'steer')
+  const [promptMode, setPromptMode] = usePref<PromptMode>('promptMode', PICKED_MODES, 'steer')
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [doneAlerts, setDoneAlerts] = useState(() => window.ChoiBuddyNative?.doneAlerts() ?? true)
   const [notifications, setNotifications] = useState(() => window.ChoiBuddyNative?.notificationsAllowed() ?? true)
@@ -832,7 +832,7 @@ export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourc
             className="select"
             value={promptMode}
             title={t('settings.promptMode')}
-            options={PROMPT_MODES.map(mode => ({ value: mode, label: t(MODE_OPTION[mode]) }))}
+            options={PICKED_MODES.map(mode => ({ value: mode, label: t(MODE_OPTION[mode]) }))}
             onChange={setPromptMode}
           />
         </div>
