@@ -286,3 +286,58 @@ test('pictures Claude reads or gets back from a tool land in the gallery', () =>
   assert.equal(steps[1]?.preview?.type, 'image')
   assert.equal(summary.count, 2)
 })
+
+test('a session the mod still polls for comes back after the bridge lost it, unless Claude Code ended it', () => {
+  const { store, tick } = makeStore()
+  const found = { cwd: 'C:\\work\\korus', transcript: 'C:\\claude\\projects\\korus\\open-1.jsonl', at: 500 }
+  let looked = 0
+  const find = (): typeof found => {
+    looked += 1
+
+    return found
+  }
+
+  assert.equal(store.revive('open-1', find), true)
+  store.takePrompts('open-1')
+
+  const back = store.snapshot(SERVER).sessions[0]
+
+  assert.equal(back?.status, 'idle')
+  assert.equal(back?.cwd, 'C:\\work\\korus')
+  assert.equal(back?.updatedAt, 500)
+  assert.equal(back?.canPrompt, true)
+  assert.equal(store.transcriptPath('open-1'), found.transcript)
+  assert.equal(store.queuePrompt('open-1', '이어서 해 줘'), 'queued')
+
+  // Known sessions are left alone without looking for a transcript.
+  assert.equal(store.revive('open-1', find), false)
+  assert.equal(looked, 1)
+  assert.equal(store.revive('no-transcript', () => null), false)
+
+  store.apply(hook('SessionStart', { source: 'startup' }, 'gone-1'))
+  store.apply(hook('SessionEnd', { reason: 'exit' }, 'gone-1'))
+  tick(31 * 60_000)
+  store.takePrompts('open-1')
+  assert.deepEqual(store.prune(), ['gone-1'])
+  assert.equal(store.revive('gone-1', find), false)
+  assert.equal(looked, 1)
+
+  // Started again with the same id: it may come back later.
+  store.apply(hook('SessionStart', { source: 'resume' }, 'gone-1'))
+  assert.equal(store.sessions.get('gone-1')?.status, 'idle')
+})
+
+test('a quiet session stays while its mod polls and goes once the mod stops', () => {
+  const { store, tick } = makeStore()
+
+  store.apply(hook('SessionStart', { source: 'startup' }))
+
+  for (let hour = 0; hour < 13; hour += 1) {
+    tick(60 * 60_000)
+    store.takePrompts('sess-1')
+    assert.deepEqual(store.prune(), [])
+  }
+
+  tick(11_000)
+  assert.deepEqual(store.prune(), ['sess-1'])
+})

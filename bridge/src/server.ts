@@ -10,9 +10,9 @@ import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession } from './launch.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
-import { Transcripts } from './transcripts.ts'
+import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
 import { baseName, type FileReader, languageOf } from './previews.ts'
-import { parseHookInput, parseSlash, Store } from './store.ts'
+import { parseHookInput, parseSlash, type Revival, Store } from './store.ts'
 import { purgeTrash } from './trash.ts'
 
 const HOOK_BODY_LIMIT = 32 * 1024 * 1024
@@ -211,6 +211,23 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const gallery = new Gallery(options.galleryDir, now, randomUUID)
   const store = new Store({ read: options.read ?? readPreviewFile, now, newId: randomUUID, gallery })
   const transcripts = new Transcripts(join(options.claudeDir, 'projects'))
+
+  // Where a session the bridge lost left off, read from its transcript.
+  const revival = (sessionId: string): Revival | null => {
+    const path = transcripts.find(sessionId, null)
+
+    if (path === null) return null
+
+    let at = now()
+
+    try {
+      at = statSync(path).mtimeMs
+    } catch {
+      // Gone between finding and reading: it did something just now.
+    }
+
+    return { cwd: lastCwd(path) ?? glanceAt(path).cwd ?? '', transcript: path, at }
+  }
   const docs = new Docs(options.claudeDir, options.docBackupDir)
   const trashDir = options.trashDir ?? join(options.uploadsDir, '..', 'trash')
   // In memory only: a restarted bridge always starts with this off.
@@ -444,6 +461,13 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     if (path === '/mod/poll') {
       const sessionId = str(parsed, 'sessionId')
+
+      // Claude Code is open for this session even when the bridge lost it.
+      if (sessionId !== null && store.revive(sessionId, () => revival(sessionId))) {
+        log(`session ${sessionId} is back: its mod still polls`)
+        scheduleSnapshot()
+      }
+
       const prompts = sessionId === null ? [] : store.takePrompts(sessionId)
       const commands = sessionId === null ? [] : store.takeCommands(sessionId)
       const session = sessionId === null ? undefined : store.sessions.get(sessionId)

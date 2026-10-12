@@ -323,3 +323,25 @@ ${readSlice(path, Math.max(HEAD_BYTES, size - TAIL_BYTES), Math.min(TAIL_BYTES, 
 
   return { title: reader.bestTitle, cwd: reader.cwd }
 }
+
+// The folder a session was last in: the newest line near the end that names
+// one (Claude moves between folders as it works). Null when none is found.
+export function lastCwd(path: string): string | null {
+  let size = 0
+
+  try {
+    size = statSync(path).size
+  } catch {
+    return null
+  }
+
+  const lines = readSlice(path, Math.max(0, size - TAIL_BYTES), Math.min(size, TAIL_BYTES)).split('\n')
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const cwd = str(parseJsonObject(lines[index] ?? ''), 'cwd')
+
+    if (cwd !== null && cwd !== '') return cwd
+  }
+
+  return null
+}

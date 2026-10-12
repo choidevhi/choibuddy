@@ -109,6 +109,10 @@ export function parseSlash(text: string): { command: string; args: string } | nu
 
 export type QueueResult = 'queued' | 'no-session' | 'no-mod'
 
+// What the bridge knows about a session it is about to bring back: its
+// folder, its transcript and when it last did something.
+export type Revival = { cwd: string; transcript: string; at: number }
+
 // The mod polls every 1.5 s; a few missed polls mean it is gone.
 const MOD_ALIVE_MS = 10_000
 const OUTGOING_TTL_MS = 10 * 60_000
@@ -118,6 +122,9 @@ export class Store {
   readonly pending = new Map<string, PendingEntry>()
   limits: Limits | null = null
   readonly #modSeen = new Map<string, number>()
+  // Sessions Claude Code ended while this bridge ran. A mod that still polls
+  // for one does not bring it back.
+  readonly #ended = new Set<string>()
   readonly #transcripts = new Map<string, string>()
   readonly #outgoing = new Map<string, Outgoing[]>()
   readonly #commandsOut = new Map<string, OutgoingCommand[]>()
@@ -153,15 +160,23 @@ export class Store {
       return existing
     }
 
-    const session: Session = {
-      id: input.sessionId,
-      name: input.cwd === '' ? 'Claude' : baseName(input.cwd),
-      cwd: input.cwd,
+    const session = this.#create(input.sessionId, input.cwd, input.mode ?? 'default', now)
+
+    this.sessions.set(session.id, session)
+
+    return session
+  }
+
+  #create(id: string, cwd: string, mode: string, at: number): Session {
+    return {
+      id,
+      name: cwd === '' ? 'Claude' : baseName(cwd),
+      cwd,
       status: 'idle',
-      mode: input.mode ?? 'default',
-      startedAt: now,
-      updatedAt: now,
-      turnStartedAt: now,
+      mode,
+      startedAt: at,
+      updatedAt: at,
+      turnStartedAt: at,
       prompt: null,
       message: null,
       steps: [],
@@ -175,10 +190,26 @@ export class Store {
       commandLog: [],
       canCommand: false,
     }
+  }
 
-    this.sessions.set(session.id, session)
+  // The mod polls only while Claude Code is open. A session it polls for
+  // that the bridge does not know (the bridge restarted, or the session sat
+  // idle for a long time) is still open, so it comes back as idle and takes
+  // prompts again. `find` runs only when the session may come back; null
+  // when there is no transcript to show for it.
+  revive(sessionId: string, find: () => Revival | null): boolean {
+    if (this.sessions.has(sessionId) || this.#ended.has(sessionId)) return false
 
-    return session
+    const found = find()
+
+    if (found === null) return false
+
+    const session = this.#create(sessionId, found.cwd, 'default', found.at)
+
+    this.sessions.set(sessionId, session)
+    this.#transcripts.set(sessionId, found.transcript)
+
+    return true
   }
 
   #alert(type: AlertType, session: Session, text: string, pending: Pending | null): Alert {
@@ -325,6 +356,7 @@ export class Store {
           session.toolCount = 0
         }
         if (session.status === 'ended') session.status = 'idle'
+        this.#ended.delete(session.id)
         break
       }
       case 'UserPromptSubmit': {
@@ -460,6 +492,7 @@ export class Store {
         this.#settle(session)
         cleared = this.#clearPending(session.id, () => true)
         session.status = 'ended'
+        this.#ended.add(session.id)
         break
       }
       default:
@@ -758,8 +791,10 @@ export class Store {
 
     for (const session of this.sessions.values()) {
       const ttl = session.status === 'ended' ? ENDED_TTL_MS : IDLE_TTL_MS
+      // Quiet for hours, but Claude Code is still open: keep it.
+      const open = session.status !== 'ended' && this.#modAlive(session.id, now)
 
-      if (now - session.updatedAt > ttl && this.#pendingOf(session.id).length === 0) {
+      if (!open && now - session.updatedAt > ttl && this.#pendingOf(session.id).length === 0) {
         this.sessions.delete(session.id)
         this.#modSeen.delete(session.id)
         this.#outgoing.delete(session.id)

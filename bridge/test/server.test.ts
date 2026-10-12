@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -9,14 +9,14 @@ import { withOurHooks, withoutOurHooks } from '../src/settings-hooks.ts'
 
 const TOKEN = 'test-token-0123456789abcdefghijklmnop'
 
-async function withBridge(holdMs: number, body: (bridge: Bridge, base: string) => Promise<void>): Promise<void> {
+async function withBridge(holdMs: number, body: (bridge: Bridge, base: string, claudeDir: string) => Promise<void>): Promise<void> {
   const galleryDir = mkdtempSync(join(tmpdir(), 'choibuddy-gallery-'))
   const claudeDir = mkdtempSync(join(tmpdir(), 'choibuddy-claude-'))
   const uploadsDir = mkdtempSync(join(tmpdir(), 'choibuddy-uploads-'))
   const bridge = await startBridge({ config: { port: 0, token: TOKEN, pcId: 'pc-test', devices: [] }, saveConfig: () => {}, galleryDir, uploadsDir, docBackupDir: join(claudeDir, 'backups'), claudeDir, log: () => {}, bindTailnet: false, holdMs, read: () => null })
 
   try {
-    await body(bridge, `http://127.0.0.1:${bridge.port}`)
+    await body(bridge, `http://127.0.0.1:${bridge.port}`, claudeDir)
   } finally {
     await bridge.close()
   }
@@ -153,6 +153,44 @@ test('a prompt from the phone reaches the mod poll, and the mod routes refuse br
 
     assert.deepEqual(objects(arr(polled, 'prompts')).map(item => str(item, 'text')), ['hi'])
     assert.equal((await post('/mod/poll', { sessionId: 's1' }, { Origin: 'https://evil.example' })).status, 403)
+  })
+})
+
+test('a session still open in Claude Code comes back when its mod polls a bridge that lost it', async () => {
+  await withBridge(5_000, async (_bridge, url, claudeDir) => {
+    const id = '0c0ffee0-1234-4abc-8def-0123456789ab'
+    const projectDir = join(claudeDir, 'projects', 'C--work-korus')
+    const authorized = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(
+      join(projectDir, `${id}.jsonl`),
+      [
+        JSON.stringify({ type: 'user', cwd: 'C:\\work', sessionId: id, message: { role: 'user', content: 'korus로 가서 부가세율 고쳐줘' } }),
+        JSON.stringify({ type: 'assistant', cwd: 'C:\\work\\korus', sessionId: id, message: { role: 'assistant', content: [{ type: 'text', text: '고칠게요.' }] } }),
+        '',
+      ].join('\n'),
+    )
+
+    // No hook since the bridge started: the prompt has nowhere to go yet.
+    assert.equal((await fetch(`${url}/api/prompt`, { method: 'POST', headers: authorized, body: JSON.stringify({ sessionId: id, text: '이어서' }) })).status, 409)
+
+    await fetch(`${url}/mod/poll`, { method: 'POST', body: JSON.stringify({ sessionId: id }) })
+
+    const snapshot = parseJsonObject(await (await fetch(`${url}/api/snapshot`, { headers: authorized })).text())
+    const session = objects(arr(snapshot, 'sessions')).find(item => str(item, 'id') === id)
+
+    assert.equal(str(session ?? {}, 'status'), 'idle')
+    // It moved to korus after starting in C:\work; the newest folder counts.
+    assert.equal(str(session ?? {}, 'cwd'), 'C:\\work\\korus')
+    assert.equal((await fetch(`${url}/api/prompt`, { method: 'POST', headers: authorized, body: JSON.stringify({ sessionId: id, text: '이어서' }) })).status, 200)
+
+    // A mod polling for a session with no transcript stays unknown.
+    await fetch(`${url}/mod/poll`, { method: 'POST', body: JSON.stringify({ sessionId: 'no-such-session' }) })
+
+    const after = parseJsonObject(await (await fetch(`${url}/api/snapshot`, { headers: authorized })).text())
+
+    assert.equal(objects(arr(after, 'sessions')).some(item => str(item, 'id') === 'no-such-session'), false)
   })
 })
 
