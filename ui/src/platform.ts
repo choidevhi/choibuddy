@@ -17,6 +17,12 @@ function detect(): Platform {
 
 export const platform: Platform = detect()
 
+// The desktop shell also runs on macOS ('windows' means the Tauri desktop app).
+export const isMac = platform === 'windows' && /Macintosh|Mac OS X/.test(navigator.userAgent)
+
+// The in-app browser is WebView2 only.
+export const hasBrowser = platform === 'windows' && !isMac
+
 export function parseConnection(text: string): Connection | null {
   try {
     const value: { baseUrl?: string; token?: string } | null = JSON.parse(text)

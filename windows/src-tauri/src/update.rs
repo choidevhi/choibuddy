@@ -1,19 +1,28 @@
 //! Updates the app from a GitHub release: downloads the installer, runs it
-//! silently once this app has quit, and starts the new version.
+//! silently once this app has quit, and starts the new version. Windows only;
+//! on macOS the page opens the release's .dmg in the browser instead.
 
+#[cfg(windows)]
 use std::io::Read;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::{Command, Stdio};
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const RELEASES: &str = "https://github.com/choidevhi/choibuddy/releases/download/";
 // Smaller than this is an error page, not an installer.
+#[cfg(windows)]
 const MIN_INSTALLER_BYTES: u64 = 1_000_000;
 
 /// The installer's file name when `url` is one of this project's release
 /// installers, else None: the app downloads nothing else.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn installer_name(url: &str) -> Option<&str> {
     let rest = url.strip_prefix(RELEASES)?;
     let (tag, name) = rest.split_once('/')?;
@@ -32,6 +41,7 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
+#[cfg(windows)]
 fn looks_like_installer(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else {
         return false;
@@ -42,6 +52,7 @@ fn looks_like_installer(path: &Path) -> bool {
     meta.len() >= MIN_INSTALLER_BYTES && read.is_ok() && &head == b"MZ"
 }
 
+#[cfg(windows)]
 fn download(url: &str, to: &Path) -> Result<(), String> {
     // Windows' own curl (10 1803 and later) follows GitHub's redirect to the file.
     let done = Command::new("curl.exe")
@@ -67,6 +78,7 @@ fn download(url: &str, to: &Path) -> Result<(), String> {
 /// Downloads the installer, then hands over to a hidden helper that waits
 /// for this app to quit, installs silently and starts the new version. The
 /// caller quits the app right after this returns Ok.
+#[cfg(windows)]
 pub fn install(url: &str) -> Result<(), String> {
     let name = installer_name(url).ok_or_else(|| "not a ChoiBuddy release installer".to_owned())?;
     let dir: PathBuf = std::env::temp_dir().join("ChoiBuddy-update");
@@ -94,6 +106,11 @@ pub fn install(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(windows))]
+pub fn install(_url: &str) -> Result<(), String> {
+    Err("updates install by themselves on Windows only".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +136,7 @@ mod tests {
         assert!(!is_newer("beta", "0.6.0"));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_short_or_foreign_file_is_not_an_installer() {
         let dir = tempfile::tempdir().unwrap();

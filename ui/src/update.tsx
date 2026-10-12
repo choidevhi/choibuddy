@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useBackLayer } from './back.ts'
 import { showToast } from './confirm.tsx'
 import { useI18n } from './i18n.ts'
-import { platform } from './platform.ts'
+import { isMac, platform } from './platform.ts'
 
 // The version this build of the screens belongs to (package.json).
 export const APP_VERSION = __APP_VERSION__
@@ -21,6 +21,8 @@ export type Release = {
   page: string
   exe: string | null
   apk: string | null
+  // A macOS build in the release; without one a Mac is not told to update.
+  dmg?: string | null
 }
 
 // "0.6.10" is newer than "0.6.9"; anything unreadable is not newer.
@@ -59,14 +61,16 @@ async function fetchLatest(): Promise<Release | null> {
 
     let exe: string | null = null
     let apk: string | null = null
+    let dmg: string | null = null
 
     for (const asset of Array.isArray(body.assets) ? body.assets : []) {
       if (typeof asset.name !== 'string' || typeof asset.browser_download_url !== 'string') continue
       if (asset.name.endsWith('_x64-setup.exe')) exe = asset.browser_download_url
       if (asset.name.endsWith('.apk')) apk = asset.browser_download_url
+      if (asset.name.endsWith('.dmg')) dmg = asset.browser_download_url
     }
 
-    return { version: body.tag_name.replace(/^v/, ''), page: body.html_url, exe, apk }
+    return { version: body.tag_name.replace(/^v/, ''), page: body.html_url, exe, apk, dmg }
   } catch {
     return null
   }
@@ -148,12 +152,22 @@ export function useUpdate(): UpdateState {
     }
   }, [])
 
-  return { release: latest !== null && isNewer(latest.version, APP_VERSION) ? latest : null, checkedAt, checking, check }
+  const newer = latest !== null && isNewer(latest.version, APP_VERSION) ? latest : null
+
+  // A Mac hears only of releases that carry a .dmg.
+  return { release: isMac && (newer?.dmg ?? null) === null ? null : newer, checkedAt, checking, check }
 }
 
 // Windows downloads and installs it, then starts again; the phone opens the
 // APK's download, which Android then offers to install. An error comes back as text.
 export async function applyUpdate(release: Release): Promise<string | null> {
+  // macOS: the release page, to pick the .dmg for this Mac and drag it into Applications.
+  if (isMac) {
+    openPage(release.page)
+
+    return null
+  }
+
   if (platform === 'windows') {
     if (release.exe === null) return 'no installer'
 
@@ -195,7 +209,7 @@ export function UpdateSheet({ release, onClose }: { release: Release; onClose: (
 
     if (error !== null) showToast(`${t('update.failed')}: ${error}`)
     // Windows quits for the installer; nothing more happens here.
-    if (error !== null || platform !== 'windows') {
+    if (error !== null || platform !== 'windows' || isMac) {
       setBusy(false)
       onClose()
     }
@@ -206,7 +220,7 @@ export function UpdateSheet({ release, onClose }: { release: Release; onClose: (
       <div className="sheet confirm-sheet" role="dialog" aria-modal="true" aria-label={t('update.title', { v: release.version })} onClick={event => event.stopPropagation()}>
         <div className="confirm-body">
           <div className="sheet-title">{t('update.title', { v: release.version })}</div>
-          <div className="confirm-hint">{platform === 'windows' ? t('update.hintWindows') : t('update.hintPhone')}</div>
+          <div className="confirm-hint">{isMac ? t('update.hintMac') : platform === 'windows' ? t('update.hintWindows') : t('update.hintPhone')}</div>
           <button type="button" className="link-btn update-notes" onClick={() => openPage(release.page)}>
             {t('update.notes')}
           </button>

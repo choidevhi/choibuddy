@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { type JsonObject, obj, objects, arr, parseJsonObject, str } from '../src/json.ts'
 import { startBridge } from '../src/server.ts'
-import { Terminals } from '../src/terminal.ts'
+import { codexLine, Terminals } from '../src/terminal.ts'
 
 const TOKEN = 'test-token-0123456789abcdefghijklmnop'
 
@@ -122,4 +122,14 @@ test("Codex's first prompt reaches it as one plain argument, never run by the sh
     followed?.stop()
     terminals.closeAll()
   }
+})
+
+test('the line that starts Codex is quoted for the shell it is typed into', () => {
+  const prompt = "it's ’quoted’ $(rm -rf ~) ; next\nline"
+
+  assert.equal(codexLine(['C:\\Codex\\codex.exe', '--no-daemon'], '', 'win32'), 'C:\\Codex\\codex.exe --no-daemon')
+  assert.equal(codexLine(['C:\\Program Files\\codex.exe'], prompt, 'win32'), "& 'C:\\Program Files\\codex.exe' 'it''s ''quoted'' $(rm -rf ~) ; next line'")
+  // macOS and Linux: POSIX single quotes, where only ' itself needs care.
+  assert.equal(codexLine(['/opt/homebrew/bin/codex', '--no-daemon'], prompt, 'darwin'), "/opt/homebrew/bin/codex --no-daemon 'it'\\''s ’quoted’ $(rm -rf ~) ; next line'")
+  assert.equal(codexLine(['/Users/Kim Lee/bin/codex'], '', 'darwin'), "'/Users/Kim Lee/bin/codex'")
 })

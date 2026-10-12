@@ -85,16 +85,29 @@ function clampSize(value: number, max: number): number {
   return Math.min(max, Math.max(MIN_SIZE, Math.floor(Number.isFinite(value) ? value : 80)))
 }
 
-// Text PowerShell takes as one literal string. PowerShell also ends a
-// single-quoted string at a typographic quote, and a control character
-// would act as a key in the terminal.
-function psLiteral(text: string): string {
-  return `'${text.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/['‘’‚‛]/g, "''")}'`
+// Text the terminal's shell takes as one literal string: PowerShell's single
+// quotes on Windows (a typographic quote ends them too), POSIX single quotes
+// elsewhere. A control character would act as a key, so it goes.
+function literal(text: string, platform: NodeJS.Platform): string {
+  const plain = text.replace(/[\x00-\x1f\x7f]+/g, ' ')
+
+  return platform === 'win32' ? `'${plain.replace(/['‘’‚‛]/g, "''")}'` : `'${plain.replace(/'/g, `'\\''`)}'`
 }
 
-// A program PowerShell runs, quoted when its path has spaces.
-function psProgram(path: string): string {
-  return /\s/.test(path) ? `& ${psLiteral(path)}` : path
+// A word left bare when nothing in it means anything to the shell.
+function word(text: string, platform: NodeJS.Platform): string {
+  return (platform === 'win32' ? /^[\w:./\\-]+$/ : /^[\w@%+=:,./-]+$/).test(text) ? text : literal(text, platform)
+}
+
+// The line typed into a terminal to start Codex: the program, ChoiBuddy's
+// own flags, then the first prompt as one plain argument.
+export function codexLine(command: string[], prompt: string, platform: NodeJS.Platform = process.platform): string {
+  const [program = 'codex', ...flags] = command
+  const bare = word(program, platform)
+  // PowerShell runs a quoted path only after its call operator.
+  const start = platform === 'win32' && bare !== program ? `& ${bare}` : bare
+
+  return [start, ...flags.map(flag => word(flag, platform)), ...(prompt === '' ? [] : [literal(prompt, platform)])].join(' ')
 }
 
 function info({ id, title, cwd, run, startedAt, exitCode, exited }: Term): TermInfo {
@@ -159,12 +172,7 @@ export class Terminals {
     if (input.run === 'claude') pty.write('claude\r')
     // Codex takes the first prompt on its command line, after its own flags
     // (ChoiBuddy's, never typed by anyone).
-    if (input.run === 'codex') {
-      const [program, ...flags] = this.#codex() ?? ['codex']
-      const words = [psProgram(program ?? 'codex'), ...flags.map(flag => (/\s/.test(flag) ? psLiteral(flag) : flag)), ...(input.prompt === '' ? [] : [psLiteral(input.prompt)])]
-
-      pty.write(`${words.join(' ')}\r`)
-    }
+    if (input.run === 'codex') pty.write(`${codexLine(this.#codex() ?? ['codex'], input.prompt)}\r`)
 
     this.#terms.set(term.id, term)
 

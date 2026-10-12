@@ -16,7 +16,7 @@ import { arrived, type OutPrompt, outPrompt, type Queued, syncOutbox } from './o
 import { type PcEntry, useSessionNav } from './sessions.tsx'
 import { closeLeaf, forgetSession, leavesOf, MAX_TILES, openBrowserBeside, sessionLeavesOf, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 import { Picker } from './picker.tsx'
-import { platform, readPref } from './platform.ts'
+import { hasBrowser as browserAvailable, platform, readPref } from './platform.ts'
 import { useTypewriter } from './typewriter.ts'
 
 const PAGE = 150
@@ -1023,7 +1023,7 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
     if (first !== undefined) focusLeaf(first)
   }
 
-  const canBrowser = platform === 'windows' && (hasBrowser || leaves.length < MAX_TILES)
+  const canBrowser = browserAvailable && (hasBrowser || leaves.length < MAX_TILES)
 
   return (
     <div className="convo convo--chat">

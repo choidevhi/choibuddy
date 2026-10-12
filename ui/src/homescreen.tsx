@@ -8,7 +8,7 @@ import { useI18n } from './i18n.ts'
 import { BrowserPane } from './browser.tsx'
 import { GlobeIcon, SplitDownIcon, SplitIcon, XIcon } from './icons.tsx'
 import { ConnectionContext, type LinkState } from './live.ts'
-import { platform } from './platform.ts'
+import { hasBrowser } from './platform.ts'
 import { type PcEntry, useSessionNav } from './sessions.tsx'
 import { closeLeaf, leavesOf, MAX_TILES, openBrowserBeside, sessionLeavesOf, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 
@@ -50,7 +50,7 @@ export function HomeScreen({ feeds, streams, sessions, limits, auto, link, tone,
   const sessionOf = (leaf: TileLeaf): PcSession | null => (leaf.sessionId === null ? auto : (sessions.find(session => session.id === leaf.sessionId) ?? null))
   const focusedSession = focused === undefined ? null : sessionOf(focused)
   const shownIds = new Set(panes.flatMap(leaf => (leaf.sessionId === null ? [] : [leaf.sessionId])))
-  const canBrowser = platform === 'windows' && (leaves.length > panes.length || leaves.length < MAX_TILES)
+  const canBrowser = hasBrowser && (leaves.length > panes.length || leaves.length < MAX_TILES)
 
   const show = (leafId: string, sessionId: string | null): void => setTile(current => setLeafSession(current, leafId, sessionId))
 

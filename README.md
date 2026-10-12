@@ -30,7 +30,7 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 - **Chat.** Whole conversations come from the session transcripts, with the pictures Claude opened and the ones you sent shown where they happened, live. Send prompts and attach files (from the home screen too): pictures show as thumbnails in the prompt box and inside your bubble once sent, never as a list of paths. A prompt you send stays one bubble, dimmed while it waits in the queue, until the transcript has it, so nothing blinks. Each session keeps its own unsent draft and attachments, so you can switch sessions and come back to it.
 - **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), reload its plugins (`/reload-plugins`), open a terminal in its folder, archive it or delete it. Ended sessions can be folded away, or archived or deleted all at once.
 - **Older mod, one tap.** A session started before the companion mod was updated says so in the chat, with a button that runs `/reload-plugins` there as soon as the session is idle. A session whose mod is too old to take commands from the app never answers; after a while the chat says so and asks you to type `/reload-plugins` in its terminal once.
-- **Terminal, inside the app.** The terminal tab opens PowerShell on any of your PCs right in the app: what you type goes straight to the PC, output streams back live, and a screen that joins later (or another device) sees what came before. The phone gets Esc, Tab, Ctrl+C and arrow keys. The terminal button above the session list opens one in that session's folder.
+- **Terminal, inside the app.** The terminal tab opens a shell (PowerShell on Windows, your login shell on a Mac) on any of your PCs right in the app: what you type goes straight to the PC, output streams back live, and a screen that joins later (or another device) sees what came before. The phone gets Esc, Tab, Ctrl+C and arrow keys. The terminal button above the session list opens one in that session's folder.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
 - **Codex too (beta).** Press "Connect Codex" in the ＋ tab on a Windows PC and restart Codex. Without the `codex` command, ChoiBuddy installs OpenAI's Codex CLI first (winget). Then it adds its hooks and has Codex trust them, the same way Codex's own `/hooks` screen does. If that does not go through, a popup shows how to allow the hooks once in Codex, with a button that opens Codex in the app's terminal. Start Codex sessions from "New session" too. Codex sessions then show up with a tag: their steps (commands, patches), the conversation from Codex's own files, and its approval requests, which you can allow or deny from anywhere. Codex takes no prompts, slash commands or usage reports from outside, so those stay Claude Code only.
@@ -82,6 +82,7 @@ Steps:
    - It copies the bridge and the app's Node.js to `~/.choibuddy/app` and adds hooks to `~/.claude/settings.json`. The original file is backed up first as `settings.json.choibuddy-backup-<time>`.
    - It also installs the companion mod. Sessions that were already open show a "Reload plugins" button in the chat (or run `/reload-plugins` in them).
    - The installer is not code-signed. If SmartScreen warns, choose **More info → Run anyway**.
+   - **macOS** (no release yet): build it from this repository (see [Building](#building)), open the `.dmg` and drag ChoiBuddy to Applications. The app is not signed, so open it the first time with right-click → **Open**. The Mac app brings its own Node.js 24 too. **Install** for Tailscale opens its download page. The in-app browser and in-app updates are Windows only. The first time you open a new session, macOS asks to let ChoiBuddy control Terminal.
 2. **Phone.**
    - Install `ChoiBuddy-<version>.apk`; Android asks you to allow installs from your browser or file app.
    - In the Windows app, open the **＋** tab, press **Create a pairing code** and scan the QR with the phone app.
@@ -145,7 +146,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 corepack pnpm test         # bridge tests
 corepack pnpm typecheck    # bridge and screens
 corepack pnpm build        # screens (ui/dist)
-corepack pnpm tauri build  # Windows installer (first fetches Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256, and copies node-pty beside it)
+corepack pnpm tauri build  # Windows installer, or on macOS the .app and .dmg (first fetches that OS's Node.js into windows/src-tauri/runtime, checked against a pinned SHA-256, and copies node-pty beside it)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JDK 21 in JAVA_HOME

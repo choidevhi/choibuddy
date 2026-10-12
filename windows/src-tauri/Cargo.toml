@@ -1,6 +1,6 @@
 [package]
 name = "choibuddy"
-version = "0.7.0"
+version = "0.7.1"
 description = "Claude Code 작업을 실시간으로 보여 주고 원격 승인을 받는 위젯"
 authors = ["choidevhi"]
 edition = "2024"
@@ -20,13 +20,17 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # `unstable` turns on multi-webview (`Window::add_child`) for the in-app browser.
-tauri = { version = "2", features = ["tray-icon", "image-png", "unstable"] }
+# `macos-private-api` lets the floating buddy's window be transparent on macOS.
+tauri = { version = "2", features = ["tray-icon", "image-png", "unstable", "macos-private-api"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+
+# The in-app browser drives WebView2 directly, so it is Windows only.
+[target.'cfg(windows)'.dependencies]
 # Same image crate Tauri already builds for `image-png`; crops browser captures.
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Pinned to the versions wry uses, so `with_webview` hands us the same COM types.

@@ -6,6 +6,7 @@ import type { Feed } from './feeds.ts'
 import { useI18n } from './i18n.ts'
 import { type CodexState, fetchCodex, fetchProjects, fetchTerms, openNewSession, type SessionAgent, type TermState } from './live.ts'
 import { Picker } from './picker.tsx'
+import { isMac } from './platform.ts'
 import { openTerminalTab } from './terminal.tsx'
 
 type Props = {
@@ -68,6 +69,8 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
   // A window on the PC cannot hand Codex its first prompt.
   const promptOff = chosen === 'codex' && !inApp
   const cwd = folder === CUSTOM ? custom.trim() : folder
+  // A Mac's folders start with /, a Windows PC's with a drive.
+  const posixPaths = projects[0] === undefined ? isMac : projects[0].cwd.startsWith('/')
 
   const open = async (): Promise<void> => {
     if (feed === null || cwd === '') return
@@ -140,7 +143,7 @@ export function NewSessionSheet({ feeds, preferredKey, onClose }: Props) {
                 <span className="folder-text">
                   <span className="folder-name">{t('newSession.custom')}</span>
                   {folder === CUSTOM && (
-                    <input className="field mono" value={custom} placeholder={'C:\\work\\project'} onChange={event => setCustom(event.target.value)} autoFocus />
+                    <input className="field mono" value={custom} placeholder={posixPaths ? '/Users/me/work/project' : 'C:\\work\\project'} onChange={event => setCustom(event.target.value)} autoFocus />
                   )}
                 </span>
               </label>

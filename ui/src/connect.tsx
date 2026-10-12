@@ -7,7 +7,7 @@ import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
 import { ago, duration, isLang, type Lang, LANGS, type MessageKey, type Translate, useI18n } from './i18n.ts'
 import { CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
 import { type CodexState, createDevice, fetchCodex, fetchSetup, fetchTerms, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setCodex, setRemoteTerminal, setTrustTailnet, type SetupStatus } from './live.ts'
-import { parsePairingLink, platform, windowsShell } from './platform.ts'
+import { isMac, parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
 import { openTerminalTab } from './terminal.tsx'
@@ -308,7 +308,7 @@ function CodexHelp({ feed, onClose }: { feed: Feed; onClose: () => void }) {
             <li>{t('codexHelp.step2')}</li>
             <li>{t('codexHelp.step3')}</li>
           </ol>
-          <div className="row-hint">{t('codexHelp.noCodex')}</div>
+          <div className="row-hint">{t(isMac ? 'codexHelp.noCodexMac' : 'codexHelp.noCodex')}</div>
         </div>
         <footer className="sheet-actions">
           <button type="button" className="btn btn--deny" onClick={onClose}>
@@ -358,7 +358,7 @@ function CodexRow({ feed }: { feed: Feed }) {
   const hint = busy
     ? t(state.cli ? 'codex.working' : 'codex.installing')
     : !state.connected
-      ? `${t('codex.hint')}${state.cli ? '' : ` ${t('codex.installHint')}`}`
+      ? `${t('codex.hint')}${state.cli ? '' : ` ${t(isMac ? 'codex.installHintMac' : 'codex.installHint')}`}`
       : state.trusted === true
         ? t('codex.ready')
         : t('codex.trust')

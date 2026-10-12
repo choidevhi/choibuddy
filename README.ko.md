@@ -30,7 +30,7 @@ Claude Code ──훅(HTTP)──────▶ 브리지(Node, PC) ──SSE�
 - **대화.** 세션 기록에서 대화 전체를 보고, Claude가 연 이미지와 내가 보낸 사진도 그 자리에 실시간으로 보여요. 프롬프트와 파일을 보내요(홈에서도). 첨부한 사진은 입력창에서 썸네일로 보이고, 보내면 내 말풍선 안에 사진으로 들어가요(경로 목록은 안 보여요). 보낸 프롬프트는 대기 중엔 흐리게, 기록에 들어갈 때까지 같은 말풍선 하나로 남아서 깜빡이지 않아요. 보내지 않은 입력과 첨부는 세션마다 따로 남아서, 다른 세션에 갔다 와도 그대로예요.
 - **세션 메뉴.** 세션을 우클릭(휴대폰은 길게 누르기)해서 이름 바꾸기, 세션 종료(Claude Code에 `/exit`), 플러그인 다시 불러오기(`/reload-plugins`), 그 폴더에서 터미널 열기, 보관, 삭제를 해요. 종료된 세션은 접어 두거나, 한 번에 모두 보관하거나 삭제할 수 있어요.
 - **예전 mod는 버튼 하나로.** 동반 mod가 바뀌기 전에 시작한 세션은 대화 화면에 알려 주고, 버튼을 누르면 세션이 쉬는 틈에 `/reload-plugins`를 실행해요. mod가 너무 예전 거라 앱에서 보낸 명령을 받지 못하는 세션은, 조금 뒤 대화 화면이 그 세션 터미널에 `/reload-plugins`를 한 번 직접 입력해 달라고 알려 줘요.
-- **앱 안 터미널.** 터미널 탭에서 내 PC의 PowerShell을 앱 안에 바로 열어요. 입력한 글자는 그대로 PC로 가고, 출력은 실시간으로 와요. 나중에 연 화면(다른 기기 포함)도 앞의 내용을 같이 봐요. 휴대폰에는 Esc, Tab, Ctrl+C, 방향키 줄이 붙어요. 세션 목록 위 터미널 버튼은 그 세션 폴더에서 열어요.
+- **앱 안 터미널.** 터미널 탭에서 내 PC의 셸(윈도우는 PowerShell, 맥은 로그인 셸)을 앱 안에 바로 열어요. 입력한 글자는 그대로 PC로 가고, 출력은 실시간으로 와요. 나중에 연 화면(다른 기기 포함)도 앞의 내용을 같이 봐요. 휴대폰에는 Esc, Tab, Ctrl+C, 방향키 줄이 붙어요. 세션 목록 위 터미널 버튼은 그 세션 폴더에서 열어요.
 - **작업 중에 보낸 프롬프트(스티어링).** **바로 전달**(지금 도구가 끝나는 대로 들어가고 Claude가 이어서 반영), **끝나고 보내기**, **멈추고 보내기** 중에서 골라요.
 - **슬래시 명령.** `/`를 치면 그 세션의 명령 목록이 나오고, 보내면 명령으로 실행돼 출력이 대화에 보여요.
 - **Codex도 (베타).** 윈도우 PC에서 ＋ 탭의 "Codex 연결"을 누르고 Codex를 다시 시작하세요. `codex` 명령이 없으면 OpenAI 공식 Codex CLI를 먼저 설치해요(winget). 그다음 훅을 넣고, Codex의 `/hooks` 화면과 같은 방법으로 Codex가 신뢰하도록 해 둬요. 끝까지 되지 않으면 Codex에서 한 번 허용하는 방법을 팝업으로 알려 주고, 버튼 하나로 앱 터미널에서 Codex를 열어 줘요. "새 세션"에서 Codex 세션도 시작할 수 있어요. 그러면 Codex 세션도 표시가 붙어 보여요. 하는 일(명령, 패치), Codex 기록 파일로 읽은 대화, 승인 요청이 보이고, 승인은 어디서든 허용·거부해요. Codex는 밖에서 프롬프트, 슬래시 명령, 사용량을 주고받지 않아서 그 기능은 Claude Code에만 있어요.
@@ -82,6 +82,7 @@ Claude Code ──훅(HTTP)──────▶ 브리지(Node, PC) ──SSE�
    - 브리지와 앱의 Node.js를 `~/.choibuddy/app`에 복사하고 `~/.claude/settings.json`에 훅을 추가해요. 원래 파일은 `settings.json.choibuddy-backup-<시각>`으로 먼저 백업돼요.
    - 동반 mod도 설치해요. 이미 열려 있던 세션은 대화 화면에 "플러그인 다시 불러오기" 버튼이 떠요(터미널에서 `/reload-plugins`를 쳐도 돼요).
    - 설치 파일에 코드 서명이 없어요. SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누르세요.
+   - **macOS**(아직 릴리스 없음): 이 저장소에서 직접 빌드하고([빌드](#빌드) 참고), `.dmg`를 열어 ChoiBuddy를 응용 프로그램 폴더로 끌어다 놓아요. 서명이 없는 앱이라 처음에는 우클릭 → **열기**로 여세요. 맥용 앱에도 Node.js 24가 들어 있어요. Tailscale **설치**는 다운로드 페이지를 열어 줘요. 내장 브라우저와 앱 안 자동 업데이트는 윈도우에서만 돼요. 새 세션을 처음 열 때 macOS가 Terminal 제어를 허용할지 물어봐요.
 2. **휴대폰.**
    - `ChoiBuddy-<버전>.apk`를 설치해요. 브라우저나 파일 앱의 설치 허용을 물으면 허용해 주세요.
    - 윈도우 앱 **＋** 탭에서 **연결 코드 만들기**를 누르고, 나온 QR을 휴대폰 앱으로 찍어요.
@@ -145,7 +146,7 @@ corepack pnpm uninstall-bridge   # 훅을 지우고 브리지를 멈춤
 corepack pnpm test         # 브리지 테스트
 corepack pnpm typecheck    # 브리지 + 화면 타입 검사
 corepack pnpm build        # 화면 빌드 (ui/dist)
-corepack pnpm tauri build  # 윈도우 설치 파일 (먼저 Node.js를 windows/src-tauri/runtime에 받아 고정된 SHA-256으로 확인하고, node-pty를 옆에 복사)
+corepack pnpm tauri build  # 윈도우 설치 파일, macOS에서는 .app과 .dmg (먼저 그 OS용 Node.js를 windows/src-tauri/runtime에 받아 고정된 SHA-256으로 확인하고, node-pty를 옆에 복사)
 cd windows/src-tauri; cargo test
 cd mod; claude plugin validate .; claude plugin test .
 cd android; .\gradlew.bat --no-daemon testReleaseUnitTest assembleRelease lintRelease   # JAVA_HOME은 JDK 21

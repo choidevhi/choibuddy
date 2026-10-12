@@ -23,6 +23,8 @@ const SOURCE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const MODS_DIR = join(homedir(), '.claude', 'local-mods')
 const MOD_NAME = 'choibuddy'
 const MARKETPLACE = 'local-mods'
+// node-pty's build for this OS and CPU, which the app ships beside it.
+const PTY_BUILD = `node-pty-${process.platform}-${process.arch}`
 
 function copyApp(): string {
   const bridgeOut = join(APP_DIR, 'bridge', 'src')
@@ -98,7 +100,7 @@ function copyPty(): boolean {
     }
   }
 
-  for (const name of ['node-pty', 'node-pty-win32-x64']) {
+  for (const name of ['node-pty', PTY_BUILD]) {
     cpSync(realpathSync(join(from, name)), join(out, name), { recursive: true, filter: source => !source.endsWith('.pdb') })
   }
 
@@ -115,7 +117,7 @@ function ptyInNodeModules(): string | null {
 }
 
 function ptyVersion(scope: string): string | null {
-  const manifest = join(scope, 'node-pty-win32-x64', 'package.json')
+  const manifest = join(scope, PTY_BUILD, 'package.json')
 
   return existsSync(manifest) ? str(parseJsonObject(readFileSync(manifest, 'utf8')), 'version') : null
 }
