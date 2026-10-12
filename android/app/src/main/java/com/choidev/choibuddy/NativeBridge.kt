@@ -1,7 +1,11 @@
 package com.choidev.choibuddy
 
 import android.appwidget.AppWidgetManager
+import android.content.ActivityNotFoundException
 import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
 import android.webkit.JavascriptInterface
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
@@ -71,6 +75,23 @@ class NativeBridge(private val activity: MainActivity) {
     /** 클립보드의 사진: `{"name":…,"mime":…,"data":<base64>}`. 사진이 없거나 20MB를 넘거나 읽지 못하면 `null`. */
     @JavascriptInterface
     fun clipboardImage(): String = Photos.fromClipboard(activity) ?: "null"
+
+    /** https 링크를 휴대폰 브라우저로 연다(업데이트 APK 내려받기). https가 아니면 false. */
+    @JavascriptInterface
+    fun openUrl(url: String): Boolean {
+        val uri = Uri.parse(url)
+
+        if (uri.scheme != "https") return false
+        activity.runOnUiThread {
+            try {
+                activity.startActivity(Intent(Intent.ACTION_VIEW, uri))
+            } catch (e: ActivityNotFoundException) {
+                Log.w("NativeBridge", "no browser for $url", e)
+            }
+        }
+
+        return true
+    }
 
     /** Tailscale 앱이 깔려 있으면 true. 휴대폰은 Tailscale로 PC에 닿는다. */
     @JavascriptInterface

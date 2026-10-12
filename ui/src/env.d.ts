@@ -28,7 +28,12 @@ interface ChoiBuddyNativeApi {
   // (or its Play Store page when it is not).
   tailscaleInstalled?(): boolean
   openTailscale?(): void
+  // Added in 0.6.1: opens an https link in the phone's browser (an update's APK).
+  openUrl?(url: string): boolean
 }
+
+// The app's version, from package.json at build time.
+declare const __APP_VERSION__: string
 
 interface Window {
   ChoiBuddyNative?: ChoiBuddyNativeApi

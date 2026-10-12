@@ -10,6 +10,7 @@ import { createDevice, fetchSetup, listDevices, revokeDevice, rotateCodes, setAu
 import { parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
+import { APP_VERSION, type Release } from './update.tsx'
 
 function Toggle({ label, hint, on, onChange }: { label: string; hint?: string; on: boolean; onChange: (next: boolean) => void }) {
   return (
@@ -541,6 +542,9 @@ type ConnectProps = {
   onPrefs: (next: Prefs) => void
   onLang: (next: Lang) => void
   onSourcesChanged: () => void
+  // A newer release, when there is one.
+  update: Release | null
+  onUpdate: () => void
 }
 
 const MODE_OPTION = {
@@ -549,7 +553,7 @@ const MODE_OPTION = {
   interrupt: 'mode.interrupt',
 } as const satisfies Record<PromptMode, MessageKey>
 
-export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourcesChanged }: ConnectProps) {
+export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourcesChanged, update, onUpdate }: ConnectProps) {
   const { lang, t } = useI18n()
   const [promptMode, setPromptMode] = usePref<PromptMode>('promptMode', PROMPT_MODES, 'steer')
   const [autostart, setAutostart] = useState<boolean | null>(null)
@@ -605,6 +609,17 @@ export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourc
 
       <div className="card">
         <div className="card-title">{t('settings.title')}</div>
+        <div className="row">
+          <span className="row-text">
+            <span>{t('update.appVersion')}</span>
+            <span className="row-hint">{update === null ? t('update.latest', { v: APP_VERSION }) : t('update.available', { v: update.version, current: APP_VERSION })}</span>
+          </span>
+          {update !== null && (
+            <button type="button" className="btn small btn--allow" onClick={onUpdate}>
+              {t('update.confirm')}
+            </button>
+          )}
+        </div>
         <div className="row">
           <span>{t('settings.language')}</span>
           <Picker

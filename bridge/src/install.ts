@@ -3,6 +3,9 @@
 // first) and installs the companion mod (usage figures, prompts from the
 // widget) into ~/.claude/local-mods.
 // `--uninstall` removes the hooks and the mod again and stops the bridge.
+// `--when-idle` does nothing (exit code 3) while an approval request waits,
+// so an automatic update never drops one. Auto Accept, which lives only in
+// the running bridge, is turned on again after the restart.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -10,7 +13,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONFIG_PATH, HOME_DIR, loadConfig } from './config.ts'
-import { arr, asObject, type JsonObject, objects, parseJsonObject, str } from './json.ts'
+import { arr, asObject, type JsonObject, num, objects, parseJsonObject, str } from './json.ts'
 import { withOurHooks, withoutOurHooks } from './settings-hooks.ts'
 
 const SETTINGS_PATH = process.env.CHOIBUDDY_SETTINGS ?? join(homedir(), '.claude', 'settings.json')
@@ -136,10 +139,43 @@ async function stopBridge(port: number, token: string): Promise<void> {
   }
 }
 
+// The running bridge's state that a restart would lose: waiting approval
+// requests and Auto Accept. Null when no bridge answers.
+async function runningState(port: number, token: string): Promise<{ pending: number; autoAcceptUntil: number } | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/snapshot`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(1500) })
+    const snapshot = parseJsonObject(await res.text())
+
+    return { pending: objects(arr(snapshot, 'pending')).length, autoAcceptUntil: num(asObject(snapshot?.server), 'autoAcceptUntil') ?? 0 }
+  } catch {
+    return null
+  }
+}
+
+// Turns Auto Accept back on for what was left of it (or until turned off).
+async function restoreAutoAccept(port: number, token: string, until: number): Promise<boolean> {
+  if (until <= Date.now()) return false
+
+  const minutes = until >= Number.MAX_SAFE_INTEGER ? -1 : Math.ceil((until - Date.now()) / 60_000)
+  const res = await fetch(`http://127.0.0.1:${port}/api/auto-accept`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ minutes }),
+  }).catch(() => null)
+
+  return res?.ok === true
+}
+
 async function main(): Promise<void> {
   const config = loadConfig()
   const settings = readSettings()
   const hooks = asObject(settings.hooks) ?? {}
+  const before = await runningState(config.port, config.token)
+
+  if (process.argv.includes('--when-idle') && before !== null && before.pending > 0) {
+    console.log(`승인 요청 ${before.pending}개가 기다리고 있어요. 끝나면 다시 설치해요.`)
+    process.exit(3)
+  }
 
   await stopBridge(config.port, config.token)
 
@@ -169,11 +205,12 @@ async function main(): Promise<void> {
     ? parseJsonObject(await fetch(`http://127.0.0.1:${config.port}/api/snapshot`, { headers: { Authorization: `Bearer ${config.token}` } }).then(res => res.text()))
     : null
   const tailnetUrl = str(asObject(snapshot?.server), 'tailnetUrl')
+  const autoAccept = health && before !== null ? await restoreAutoAccept(config.port, config.token, before.autoAcceptUntil) : false
 
   console.log(`설치 위치: ${APP_DIR} (Node ${process.version})`)
   console.log(`설정 파일: ${SETTINGS_PATH} (백업 후 훅 추가)`)
   console.log(`토큰 파일: ${CONFIG_PATH}`)
-  console.log(`브리지: ${health ? '실행 중' : `시작 실패 (종료 코드 ${started.status})`}`)
+  console.log(`브리지: ${health ? '실행 중' : `시작 실패 (종료 코드 ${started.status})`}${autoAccept ? ' (Auto Accept 다시 켬)' : ''}`)
   console.log(`사용량·프롬프트 mod: ${modInstalled ? `설치됨 (${join(MODS_DIR, MOD_NAME)}), 열려 있는 세션은 /reload-plugins` : '설치 실패: claude plugin install로 직접 설치해 주세요'}`)
   // The pairing link carries the token, so it is shown as a QR in the app
   // (＋ tab) rather than printed into terminal scrollback.

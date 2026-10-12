@@ -5,6 +5,7 @@ import { answerBrowserRequest, BrowserTab } from './browser.tsx'
 import { type Feed, feedFor, loadSources, merge, type PcSession, type Source, useFeeds } from './feeds.ts'
 import { useTailnetAutoConnect } from './autoconnect.ts'
 import { closeTopLayer } from './back.ts'
+import { UpdateSheet, useUpdate } from './update.tsx'
 import { Buddy, type Tone } from './buddy.tsx'
 import { Chat } from './chat.tsx'
 import { Connect, type Prefs } from './connect.tsx'
@@ -14,6 +15,7 @@ import { HomeScreen } from './homescreen.tsx'
 import { detectLang, I18nContext, type Lang, LANGS, translator } from './i18n.ts'
 import {
   ChatIcon,
+  DownloadIcon,
   FileTextIcon,
   GlobeIcon,
   HomeIcon,
@@ -286,6 +288,9 @@ export function App() {
   const feeds = useFeeds(sources, onAlert, onBrowserRequest)
 
   useTailnetAutoConnect(feeds, name => setToast(t('toast.autoConnected', { name })))
+
+  const update = useUpdate()
+  const [updating, setUpdating] = useState(false)
   const merged = useMemo(() => merge(feeds), [feeds])
   const sessions = merged.sessions
   const ordered = useMemo(() => [...sessions].sort((a, b) => a.startedAt - b.startedAt), [sessions])
@@ -455,6 +460,12 @@ export function App() {
               </button>
             )}
 
+            {update !== null && (
+              <button type="button" className="update-badge" onClick={() => setUpdating(true)} title={t('update.title', { v: update.version })}>
+                <DownloadIcon size={14} /> <span className="update-badge-text">{t('update.badge', { v: update.version })}</span>
+              </button>
+            )}
+
             {autoAccept && (
               <button type="button" className="auto-badge" onClick={() => openTab('connect')} aria-label={t('badge.auto')}>
                 <ShieldIcon size={14} /> <span className="auto-badge-text">{t('badge.auto')}</span>
@@ -546,7 +557,7 @@ export function App() {
             ) : activeTab === 'docs' ? (
               <Docs feeds={feeds} multiPc={merged.multiPc} />
             ) : (
-              <Connect feeds={feeds} now={now} localFeed={localFeed} prefs={prefs} onPrefs={onPrefs} onLang={setLang} onSourcesChanged={reload} />
+              <Connect feeds={feeds} now={now} localFeed={localFeed} prefs={prefs} onPrefs={onPrefs} onLang={setLang} onSourcesChanged={reload} update={update} onUpdate={() => setUpdating(true)} />
             )}
           </main>
 
@@ -562,6 +573,8 @@ export function App() {
           )}
 
           {newSession && <NewSessionSheet feeds={feeds} preferredKey={current?.pcKey ?? null} onClose={() => setNewSession(false)} />}
+
+          {updating && update !== null && <UpdateSheet release={update} onClose={() => setUpdating(false)} />}
 
           {toast !== null && <div className="toast">{toast}</div>}
         </div>

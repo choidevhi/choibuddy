@@ -52,22 +52,32 @@ pub fn connection_json(home: &Path) -> String {
     }
 }
 
-pub fn is_up(port: u16) -> bool {
+/// The bridge's /api/health answer, or None when no ChoiBuddy bridge answers.
+fn health(port: u16) -> Option<String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(400)) else {
-        return false;
-    };
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(400)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
     let request = "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
 
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
+    stream.write_all(request.as_bytes()).ok()?;
 
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
 
-    response.contains("\"name\":\"choibuddy\"")
+    response.contains("\"name\":\"choibuddy\"").then_some(response)
+}
+
+pub fn is_up(port: u16) -> bool {
+    health(port).is_some()
+}
+
+/// The version the running bridge reports.
+pub fn running_version(port: u16) -> Option<String> {
+    let response = health(port)?;
+    let start = response.find("\"version\":\"")? + "\"version\":\"".len();
+    let end = response[start..].find('"')? + start;
+
+    Some(response[start..end].to_owned())
 }
 
 /// The Node the installer copied next to the bridge (the hooks use the same).
@@ -142,14 +152,53 @@ pub fn ensure(home: &Path, bundled: Option<&Path>) -> bool {
 /// that Node into ~/.choibuddy and adds the hooks to ~/.claude/settings.json
 /// (it backs the file up first).
 pub fn install(resource_dir: &Path) -> bool {
-    let script = resource_dir.join("bridge").join("src").join("install.ts");
+    run_installer(resource_dir, false) == Some(0)
+}
 
-    node(&[bundled_node(resource_dir)])
-        .arg("--no-warnings")
-        .arg(script)
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .is_ok_and(|status| status.success())
+fn run_installer(resource_dir: &Path, when_idle: bool) -> Option<i32> {
+    let script = resource_dir.join("bridge").join("src").join("install.ts");
+    let mut command = node(&[bundled_node(resource_dir)]);
+
+    command.arg("--no-warnings").arg(script).creation_flags(CREATE_NO_WINDOW);
+    if when_idle {
+        command.arg("--when-idle");
+    }
+
+    command.status().ok()?.code()
+}
+
+// The installer's answer while an approval request waits.
+const BUSY: i32 = 3;
+const UPGRADE_RETRY: Duration = Duration::from_secs(5 * 60);
+const UPGRADE_TRIES: u32 = 24;
+
+/// After the app updated itself, the bridge, the hooks and the mod follow:
+/// when the running bridge is older than this app, the bundled installer
+/// runs once no approval request waits (it keeps Auto Accept). Nothing
+/// happens where ChoiBuddy was never connected to Claude Code.
+pub fn upgrade_if_older(resource_dir: &Path, home: &Path, app_version: &str) {
+    let Some(config) = read_config(home) else {
+        return;
+    };
+
+    if !home.join("app").exists() {
+        return;
+    }
+
+    for _ in 0..UPGRADE_TRIES {
+        let Some(running) = running_version(config.port) else {
+            return;
+        };
+
+        if !crate::update::is_newer(app_version, &running) {
+            return;
+        }
+
+        match run_installer(resource_dir, true) {
+            Some(BUSY) => std::thread::sleep(UPGRADE_RETRY),
+            _ => return,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +242,22 @@ mod tests {
         std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
         std::fs::write(&installed, b"").unwrap();
         assert_eq!(node_program(&[installed.clone(), bundled]), installed);
+    }
+
+    #[test]
+    fn reads_the_running_bridges_version() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 512];
+            let _ = std::io::Read::read(&mut stream, &mut request);
+            let body = r#"{"ok":true,"name":"choibuddy","version":"0.6.1","pid":1}"#;
+            let _ = std::io::Write::write_all(&mut stream, format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes());
+        });
+
+        assert_eq!(running_version(port).as_deref(), Some("0.6.1"));
+        server.join().unwrap();
     }
 
     #[test]

@@ -2,6 +2,7 @@ mod bridge;
 mod browser;
 mod float;
 mod tailscale;
+mod update;
 
 use float::FloatState;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -85,6 +86,26 @@ async fn install_tailscale() -> bool {
 #[tauri::command]
 fn open_tailscale() -> bool {
     tailscale::open()
+}
+
+/// Opens one of this project's GitHub pages (an update's notes) in the browser.
+#[tauri::command]
+fn open_release_page(url: String) -> bool {
+    let ours = url.starts_with("https://github.com/choidevhi/choibuddy/") && !url.contains(['"', ' ', '&', '|', '^', '<', '>']);
+
+    ours && std::process::Command::new("explorer").arg(&url).spawn().is_ok()
+}
+
+/// Downloads a release installer and quits; a helper installs it and starts
+/// the new version. An error comes back as text for the page to show.
+#[tauri::command]
+async fn install_update(app: AppHandle, url: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || update::install(&url))
+        .await
+        .map_err(|error| error.to_string())??;
+    app.exit(0);
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -226,6 +247,8 @@ pub fn run() {
             tailscale_state,
             install_tailscale,
             open_tailscale,
+            install_update,
+            open_release_page,
             set_always_on_top,
             hide_window,
             minimize_window,
@@ -303,8 +326,18 @@ pub fn run() {
             }
 
             let bundled = bundled_node(app.handle());
+            let resources = app.path().resource_dir().ok();
+            let version = app.package_info().version.to_string();
 
-            std::thread::spawn(move || bridge::ensure(&bridge::home(), bundled.as_deref()));
+            // Start the bridge, then bring it up to this app's version if an update left it behind.
+            std::thread::spawn(move || {
+                let home = bridge::home();
+
+                bridge::ensure(&home, bundled.as_deref());
+                if let Some(resources) = resources {
+                    bridge::upgrade_if_older(&resources, &home, &version);
+                }
+            });
 
             Ok(())
         })

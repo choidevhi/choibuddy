@@ -1,14 +1,14 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { type CommandInfo, type Conversation, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
+import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
 import { Buddy, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type MessageKey, useI18n } from './i18n.ts'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
-import { ChevronDownIcon, ClipboardIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
+import { ChevronDownIcon, ClipboardIcon, DownloadIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
 import { readDraft, saveDraft } from './drafts.ts'
-import { clipboardImageFile } from './images.tsx'
-import { deleteConversation, fetchConversation, type Uploaded } from './live.ts'
+import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
+import { deleteConversation, fetchConversation, fetchGallery, type Uploaded } from './live.ts'
 import { Markdown } from './markdown.tsx'
 import { type PcEntry, useSessionNav } from './sessions.tsx'
 import { closeLeaf, forgetSession, leavesOf, MAX_TILES, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
@@ -17,6 +17,33 @@ import { platform, readPref } from './platform.ts'
 import { useTypewriter } from './typewriter.ts'
 
 const PAGE = 150
+
+type TimelineItem = { message: ChatMessage } | { image: GalleryImage }
+
+// Messages in transcript order with each picture placed before the first
+// message that came after it; newer pictures go at the end. Pictures older
+// than the first loaded message wait until older messages are loaded.
+export function withPictures(messages: ChatMessage[], pictures: GalleryImage[], fromStart: boolean): TimelineItem[] {
+  const first = messages[0]?.at ?? 0
+  const pending = pictures.filter(image => fromStart || image.at >= first)
+  const items: TimelineItem[] = []
+  let next = 0
+
+  for (const message of messages) {
+    while (next < pending.length && (pending[next]?.at ?? 0) < message.at) {
+      const image = pending[next]
+
+      if (image !== undefined) items.push({ image })
+      next += 1
+    }
+
+    items.push({ message })
+  }
+
+  for (const image of pending.slice(next)) items.push({ image })
+
+  return items
+}
 // How long a finished reply waits on screen for the transcript to catch up.
 const HOLD_REPLY_MS = 20_000
 const MAX_SUGGESTIONS = 8
@@ -416,6 +443,43 @@ function ConversationPane(props: PaneProps) {
   // Shown when the person scrolled up and the view stopped following.
   const [away, setAway] = useState(false)
   const layout = useRef({ height: 0, firstId: '' })
+  // Pictures of this session (Claude's and the person's uploads), oldest first.
+  const [pictures, setPictures] = useState<GalleryImage[]>([])
+  const [viewing, setViewing] = useState<GalleryImage | null>(null)
+  const galleryAt = feed?.snapshot?.gallery.latestAt ?? 0
+
+  // Read again whenever the PC's gallery gets a picture, so they show up live.
+  useEffect(() => {
+    if (feed === null || sessionId === null) {
+      setPictures([])
+
+      return
+    }
+
+    let stopped = false
+
+    void fetchGallery(feed.connection).then(list => {
+      if (!stopped) setPictures(list.filter(image => image.sessionId === sessionId).sort((a, b) => a.at - b.at))
+    })
+
+    return () => {
+      stopped = true
+    }
+  }, [sessionId, feed?.connection.token, galleryAt])
+
+  useBackLayer(viewing !== null, () => setViewing(null))
+
+  useEffect(() => {
+    if (viewing === null) return
+
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') setViewing(null)
+    }
+
+    window.addEventListener('keydown', onKey)
+
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewing])
 
   useEffect(() => {
     setFrom(null)
@@ -531,6 +595,50 @@ function ConversationPane(props: PaneProps) {
   const canDelete = entry !== null && !entry.live && live === null
   const status = live?.status ?? 'ended'
 
+  const messageBubble = (message: ChatMessage) =>
+    message.role === 'note' ? (
+      <div className="chat-note" key={message.id}>
+        {t('chat.compacted')}
+      </div>
+    ) : message.role === 'user' ? (
+      <div className="bubble bubble--me" key={message.id}>
+        <Markdown text={message.text} />
+      </div>
+    ) : (
+      <div className="bubble-row" key={message.id}>
+        <Buddy pose="base" mood="calm" tone={tone} size={28} />
+        <div className="bubble bubble--claude">
+          <Markdown text={message.text} />
+        </div>
+      </div>
+    )
+
+  // A picture where it happened: the person's uploads on their side,
+  // what Claude opened or captured on Claude's.
+  const pictureBubble = (image: GalleryImage) => {
+    const picture = (
+      <button type="button" className="bubble-picture" onClick={() => setViewing(image)} title={image.path ?? image.name}>
+        <RemoteImage connection={feed?.connection ?? null} id={image.id} alt={image.name} lazy />
+      </button>
+    )
+
+    return image.tool === 'upload' ? (
+      <div className="bubble bubble--me bubble--picture" key={`picture-${image.id}`}>
+        {picture}
+      </div>
+    ) : (
+      <div className="bubble-row" key={`picture-${image.id}`}>
+        <Buddy pose="read" mood="calm" tone={tone} size={28} />
+        <div className="bubble bubble--claude bubble--picture">
+          {picture}
+          <span className="bubble-picture-meta">
+            {image.tool} · {image.name}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <section className={`convo-main ${tiles !== null ? 'pane' : ''} ${focused && tiles !== null ? 'pane--focused' : ''}`} onPointerDown={onFocus}>
       {tiles !== null && (
@@ -605,22 +713,11 @@ function ConversationPane(props: PaneProps) {
                 {t('chat.loadOlder')}
               </button>
             )}
-            {shown.messages.map(message =>
-              message.role === 'note' ? (
-                <div className="chat-note" key={message.id}>
-                  {t('chat.compacted')}
-                </div>
-              ) : message.role === 'user' ? (
-                <div className="bubble bubble--me" key={message.id}>
-                  <Markdown text={message.text} />
-                </div>
+            {withPictures(shown.messages, pictures, shown.start === 0).map(item =>
+              'image' in item ? (
+                pictureBubble(item.image)
               ) : (
-                <div className="bubble-row" key={message.id}>
-                  <Buddy pose="base" mood="calm" tone={tone} size={28} />
-                  <div className="bubble bubble--claude">
-                    <Markdown text={message.text} />
-                  </div>
-                </div>
+                messageBubble(item.message)
               ),
             )}
             {live?.commandLog.map(result => (
@@ -682,6 +779,28 @@ function ConversationPane(props: PaneProps) {
         )}
         <Composer session={live} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact={tiles !== null} onSent={followBottom} />
       </div>
+
+      {viewing !== null && (
+        <div className="viewer" role="dialog" aria-modal="true" aria-label={viewing.name}>
+          <div className="viewer-head">
+            <span className="viewer-title">
+              <span className="viewer-name">{viewing.name}</span>
+              <span className="viewer-meta">{viewing.tool}</span>
+            </span>
+            {feed !== null && (
+              <button type="button" className="icon-btn" onClick={() => void saveImage(feed.connection, viewing.id, viewing.name)} title={t('gallery.save')}>
+                <DownloadIcon size={18} />
+              </button>
+            )}
+            <button type="button" className="icon-btn" onClick={() => setViewing(null)} title={t('action.close')}>
+              <XIcon size={18} />
+            </button>
+          </div>
+          <div className="viewer-body">
+            <RemoteImage key={viewing.id} connection={feed?.connection ?? null} id={viewing.id} alt={viewing.name} retry />
+          </div>
+        </div>
+      )}
 
       {deleting !== null && entry !== null && (
         <ConfirmSheet
