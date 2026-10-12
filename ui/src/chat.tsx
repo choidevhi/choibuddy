@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type LiveStream, PROMPT_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
 import { BrowserPane } from './browser.tsx'
@@ -9,8 +9,9 @@ import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, TrashIcon, XIcon } from './icons.tsx'
 import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
-import { deleteConversation, fetchConversation, fetchGallery, type Uploaded } from './live.ts'
+import { deleteConversation, fetchConversation, fetchGallery, reloadPlugins, type Uploaded } from './live.ts'
 import { Markdown } from './markdown.tsx'
+import { arrived, type OutPrompt, outPrompt, type Queued, syncOutbox } from './outbox.ts'
 import { type PcEntry, useSessionNav } from './sessions.tsx'
 import { closeLeaf, forgetSession, leavesOf, MAX_TILES, openBrowserBeside, sessionLeavesOf, setLeafSession, splitLeaf, type TileLeaf, TileView, useTiles, useWide } from './tiles.tsx'
 import { Picker } from './picker.tsx'
@@ -91,8 +92,9 @@ type ComposerProps = {
   loadCommands: CommandsFn
   inject?: Injection | null
   compact?: boolean
-  // Called once a prompt went out, so the conversation can jump to the bottom.
-  onSent?: () => void
+  // Called once a prompt went out (with how it was to meet a running turn),
+  // so the conversation can show it at once and jump to the bottom.
+  onSent?: (text: string, mode: PromptMode | null) => void
 }
 
 // Claude Code takes no files from a plugin's prompt, so attachments are
@@ -233,7 +235,9 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
     setSending(true)
 
     const owner = session.id
-    const ok = await onSend(owner, text, busy ? mode : undefined)
+    const sentText = text
+    const sentMode = busy ? mode : null
+    const ok = await onSend(owner, sentText, sentMode ?? undefined)
 
     setSending(false)
 
@@ -246,7 +250,7 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
       keep('', [])
       setDismissed(false)
       setMode(readPref('promptMode', PROMPT_MODES, 'steer'))
-      onSent?.()
+      onSent?.(sentText, sentMode)
     }
   }
 
@@ -438,6 +442,8 @@ function ConversationPane(props: PaneProps) {
   const [from, setFrom] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<'ask' | 'busy' | null>(null)
   const [held, setHeld] = useState<{ text: string; at: number } | null>(null)
+  // Prompts on their way in, one bubble each until the transcript has them.
+  const [outbox, setOutbox] = useState<OutPrompt[]>([])
   const scroller = useRef<HTMLDivElement>(null)
   const pinnedToBottom = useRef(true)
   const content = useRef<HTMLDivElement>(null)
@@ -486,6 +492,7 @@ function ConversationPane(props: PaneProps) {
   useEffect(() => {
     setFrom(null)
     setHeld(null)
+    setOutbox([])
     pinnedToBottom.current = true
     setAway(false)
   }, [sessionId])
@@ -510,6 +517,18 @@ function ConversationPane(props: PaneProps) {
 
   const shown = conversation?.sessionId === sessionId ? conversation : null
   const working = live !== null && (live.status === 'thinking' || live.status === 'working' || live.status === 'waiting')
+
+  const queuedPrompts = useMemo(() => (live?.queued ?? []).flatMap((item): Queued[] => (item.mode === 'command' ? [] : [{ text: item.text, mode: item.mode }])), [live?.queued])
+
+  useEffect(() => {
+    setOutbox(current => syncOutbox(current, queuedPrompts, shown?.messages ?? null, Date.now(), () => crypto.randomUUID()))
+  }, [queuedPrompts, shown, now])
+
+  // Shown the moment it is sent; slash commands have their own bubbles.
+  const onSent = (text: string, mode: PromptMode | null): void => {
+    if (!text.startsWith('/')) setOutbox(current => [...current, outPrompt(crypto.randomUUID(), text, mode, shown?.messages ?? null, Date.now())])
+    followBottom()
+  }
   // Claude's reply as it is being written.
   const typing =
     working && stream !== undefined && stream.toolUseId === null && now - stream.at < 15_000 ? `${stream.skippedLines > 0 ? '…\n' : ''}${stream.text}` : ''
@@ -575,7 +594,7 @@ function ConversationPane(props: PaneProps) {
 
   useLayoutEffect(() => {
     if (pinnedToBottom.current) stickToBottom()
-  }, [conversation, live?.queued.length, typed, live?.commandLog.length])
+  }, [conversation, live?.queued.length, outbox.length, typed, live?.commandLog.length])
 
   // A past conversation goes to the PC's trash; a live one stays.
   const remove = async (): Promise<void> => {
@@ -595,6 +614,8 @@ function ConversationPane(props: PaneProps) {
   }
 
   const canDelete = entry !== null && !entry.live && live === null
+  // A reload already waits for the session to be idle.
+  const reloading = live?.queued.some(item => item.mode === 'command' && item.text === '/reload-plugins') === true
   const status = live?.status ?? 'ended'
 
   const messageBubble = (message: ChatMessage) =>
@@ -727,6 +748,16 @@ function ConversationPane(props: PaneProps) {
                 messageBubble(item.message)
               ),
             )}
+            {outbox.flatMap(item =>
+              arrived(item, queuedPrompts, shown.messages)
+                ? []
+                : [
+                    <div className={`bubble bubble--me bubble--out ${item.leftAt === null ? 'bubble--queued' : ''}`} key={item.key}>
+                      {item.leftAt === null && working && item.mode !== null && <span className="queued-tag">{t(QUEUED_LABEL[item.mode])}</span>}
+                      <Markdown text={item.text} />
+                    </div>,
+                  ],
+            )}
             {live?.commandLog.map(result => (
               <div className="bubble-row" key={result.id}>
                 <span className="command-mark">/</span>
@@ -739,14 +770,18 @@ function ConversationPane(props: PaneProps) {
                 </div>
               </div>
             ))}
-            {live?.queued.map((item, index) => (
-              <div className="bubble bubble--me bubble--queued" key={`q-${index}-${item.text}`}>
-                <span className="queued-tag">{t(QUEUED_LABEL[item.mode])}</span>
-                <Markdown text={item.text} />
-              </div>
-            ))}
+            {live?.queued.flatMap((item, index) =>
+              item.mode === 'command'
+                ? [
+                    <div className="bubble bubble--me bubble--out bubble--queued" key={`c-${index}-${item.text}`}>
+                      <span className="queued-tag">{t(QUEUED_LABEL[item.mode])}</span>
+                      <Markdown text={item.text} />
+                    </div>,
+                  ]
+                : [],
+            )}
             {(working || typed !== '') && (
-              <div className="bubble-row">
+              <div className="bubble-row bubble-row--in">
                 <Buddy pose="think" mood="busy" tone={tone} size={28} />
                 <div className="bubble bubble--claude">
                   {typed === '' ? <span className="typing">{t('chat.working')}</span> : <Markdown text={working ? `${typed}▍` : typed} />}
@@ -771,6 +806,20 @@ function ConversationPane(props: PaneProps) {
       </div>
 
       <div className="convo-foot">
+        {live?.modOutdated === true && feed !== null && (
+          <div className="mod-notice">
+            <span className="mod-notice-text">{reloading ? t('mod.reloading') : t('mod.outdated')}</span>
+            {!reloading && (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => void reloadPlugins(feed.connection, live.id).then(ok => showToast(ok ? t('mod.reloadQueued') : t('chat.actionFailed')))}
+              >
+                {t('menu.reload')}
+              </button>
+            )}
+          </div>
+        )}
         {entry !== null && (
           <div className="convo-path-row">
             <span className="convo-path">
@@ -784,7 +833,7 @@ function ConversationPane(props: PaneProps) {
             )}
           </div>
         )}
-        <Composer session={live} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact={tiles !== null} onSent={followBottom} />
+        <Composer session={live} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact={tiles !== null} onSent={onSent} />
       </div>
 
       {viewing !== null && (

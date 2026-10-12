@@ -23,22 +23,23 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 - **A buddy with a pose for every state.** Thinking, reading, editing, running a command, waiting for you, done, error and more. Subagents get their own small, coloured buddies.
 - **Usage.** The 5-hour and weekly limits, context, tokens and cache hit rate, plus the model and effort in use. Change the model or effort right from the home screen.
 
-![Several conversations, side by side](promo/en/02-split.png)
+![PC by PC, side by side](promo/en/02-split.png)
 
 - **PC by PC, everywhere.** Home, chat and images all start the same way. Your PCs sit on the left as buddies of their own colour (hover for the name). Next come the chosen PC's sessions: open ones, ended ones under a divider, and the archive. The view comes last.
 - **Panes like tmux.** On a PC, split home or chat into up to 6 panes, left/right or top/bottom, and split a half again. Drag the lines to resize; the layout is remembered. A home pane follows whichever session is busy until you pick one for it.
-- **Chat.** Whole conversations come from the session transcripts, with the pictures Claude opened and the ones you sent shown where they happened, live. Send prompts and attach files (from the home screen too). Each session keeps its own unsent draft and attachments, so you can switch sessions and come back to it.
-- **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), open a terminal in its folder, archive it or delete it. Ended sessions can be folded away, or archived or deleted all at once.
+- **Chat.** Whole conversations come from the session transcripts, with the pictures Claude opened and the ones you sent shown where they happened, live. Send prompts and attach files (from the home screen too). A prompt you send stays one bubble, dimmed while it waits in the queue, until the transcript has it, so nothing blinks. Each session keeps its own unsent draft and attachments, so you can switch sessions and come back to it.
+- **Session menu.** Right-click a session (long-press on the phone) to rename it, end it (Claude Code gets `/exit`), reload its plugins (`/reload-plugins`), open a terminal in its folder, archive it or delete it. Ended sessions can be folded away, or archived or deleted all at once.
+- **Older mod, one tap.** A session started before the companion mod was updated says so in the chat, with a button that runs `/reload-plugins` there as soon as the session is idle.
 - **Terminal.** The terminal button above the session list opens a terminal on that PC (WezTerm, Windows Terminal or cmd), even when you press it on the phone.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
 - **New sessions.** Pick a PC, a folder and a first prompt, and Claude Code opens in a new terminal on that PC.
 
-![Point at it. Claude sees it too](promo/en/03-browser.png)
+![A browser beside the session. Claude sees it too](promo/en/03-browser.png)
 
 - **Built-in browser (Windows).** Pick an element on a page and drop it into your prompt. Claude looks at the same page with the `browser_view` tool. Open it in its own tab or as a pane right of the session you are working on (the globe button on a pane). A session on another PC works too: when Claude there calls `browser_view`, the ChoiBuddy app with its browser open answers, whichever PC it runs on.
 
-![Every image Claude saw, by project](promo/en/05-gallery.png)
+![Every image Claude saw, by PC and session](promo/en/05-gallery.png)
 
 - **Images.** Every picture and screenshot Claude opened, PC by PC and session by session. GIFs play. Save them to your device, remove them or clear a PC's list.
 - **Keyboard.** Ctrl+PageUp and Ctrl+PageDown move between the tabs.
@@ -77,7 +78,7 @@ Steps:
 
 1. **Windows app.** Install `ChoiBuddy_<version>_x64-setup.exe` and press **Connect to Claude Code**.
    - It copies the bridge and the app's Node.js to `~/.choibuddy/app` and adds hooks to `~/.claude/settings.json`. The original file is backed up first as `settings.json.choibuddy-backup-<time>`.
-   - It also installs the companion mod. Run `/reload-plugins` once in Claude Code sessions that were already open.
+   - It also installs the companion mod. Sessions that were already open show a "Reload plugins" button in the chat (or run `/reload-plugins` in them).
    - The installer is not code-signed. If SmartScreen warns, choose **More info → Run anyway**.
 2. **Phone.**
    - Install `ChoiBuddy-<version>.apk`; Android asks you to allow installs from your browser or file app.
@@ -109,7 +110,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 - **Docs tab.** It only reads and writes instruction files with known names, by their id from the list, up to 1 MB. Each file is backed up to `~/.choibuddy/doc-backups` before it is saved. Instruction files change how Claude behaves, so a device with a code has that much power too.
 - **Auto Accept.** It lives in memory only, so it turns off when the bridge restarts. It allows ordinary permission requests only; questions and plans always need a person.
 - **Connecting Tailscale devices automatically.** Off unless you turn it on for this PC. A device then gets a code of its own only over Tailscale, and only when Tailscale says it is signed in to the same account as this PC. Devices shared with you and tagged devices are left out. Each one shows in the device list and can be cut off, and turning the option off cuts all of them. Anyone who can sign in to your Tailscale account could connect, so keep that account safe.
-- **Ending a session** sends `/exit` through the companion mod, the same as typing it in the terminal. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
+- **Ending a session** and **reloading its plugins** send `/exit` and `/reload-plugins` through the companion mod, the same as typing them in the terminal. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
 - **New sessions and terminals.** A terminal opens only when the folder exists, and it starts without going through a shell (the program and its arguments are passed separately). A device with a code can open a terminal window on the PC, but cannot type into it.
 - **Built-in browser.** Pages get no access to the app's IPC; a page can only send the app the element you picked and its address. Claude's `browser_view` calls are answered by a connected ChoiBuddy app with its browser open (this PC's, or another PC's that has this one connected); the first answer counts. A device that may send prompts may show Claude a page too. An app whose browser is closed waits 3 seconds before saying so, so an open one answers first.
 
@@ -117,7 +118,7 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 
 - With `bypassPermissions` as the default mode, ordinary permission requests never come up. Questions (AskUserQuestion) and plan approvals still do.
 - If the bridge is down, a hook can leave a failure message. The bridge starts again by itself when a session starts or a prompt is sent.
-- Live code, usage and remote prompts need the companion mod. After installing or updating it, run `/reload-plugins` once in sessions that were already open.
+- Live code, usage and remote prompts need the companion mod. After installing or updating it, sessions that were already open need `/reload-plugins` once: the chat offers a button for it, or type it in the terminal.
 
 ## Project layout
 

@@ -8,6 +8,9 @@ import type { EngineInterface, Register, SessionContextUsage, SessionCost, Sessi
 
 const BRIDGE = 'http://127.0.0.1:47130'
 const POLL_MS = 1500
+// Sent with every poll, so the bridge can tell a session that still runs an
+// older copy of this mod. Kept equal to .claude-plugin/plugin.json.
+const MOD_VERSION = '0.5.2'
 const BROWSER_TOOL = 'browser_view'
 
 type UsageReport = {
@@ -183,7 +186,7 @@ async function runCommand($: EngineInterface, sessionId: string, queued: QueuedC
 }
 
 async function poll($: EngineInterface, sessionId: string): Promise<void> {
-  const reply = await send($, '/mod/poll', JSON.stringify({ sessionId }))
+  const reply = await send($, '/mod/poll', JSON.stringify({ sessionId, mod: MOD_VERSION }))
 
   if (reply === null) return
 

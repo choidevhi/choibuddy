@@ -4089,3 +4089,54 @@ body.resizing--column {
   height: auto;
   padding: 0;
 }
+
+/* A prompt on its way in: one bubble from the moment it is sent until the
+   transcript has it, fading from queued to sent */
+
+.bubble--me {
+  border: 1px solid transparent;
+}
+
+.bubble--out {
+  border-style: dashed;
+  border-color: transparent;
+  animation: bubble-in 0.2s ease-out;
+  transition:
+    opacity 0.25s ease,
+    border-color 0.25s ease;
+}
+
+.bubble--out.bubble--queued {
+  opacity: 0.65;
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.bubble-row--in {
+  animation: bubble-in 0.2s ease-out;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* A session on an older mod: one tap reloads its plugins */
+
+.mod-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 12px;
+}
+
+.mod-notice-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}

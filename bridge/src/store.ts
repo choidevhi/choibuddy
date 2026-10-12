@@ -117,6 +117,9 @@ export type Revival = { cwd: string; transcript: string; at: number }
 const MOD_ALIVE_MS = 10_000
 const OUTGOING_TTL_MS = 10 * 60_000
 
+// Claude Code's own command that loads the installed plugins again.
+export const RELOAD_COMMAND = 'reload-plugins'
+
 export class Store {
   readonly sessions = new Map<string, Session>()
   readonly pending = new Map<string, PendingEntry>()
@@ -135,6 +138,10 @@ export class Store {
   // every session, so one whose own list is unknown (the bridge restarted,
   // an older mod) borrows this one.
   #latestCommands: CommandInfo[] | null = null
+  // The mod version each session reported (mods before 0.5.2 report none),
+  // and the one installed on this PC.
+  readonly #modVersions = new Map<string, string>()
+  #installedMod: string | null = null
   readonly #agentModels = new Map<string, string>()
   readonly #deps: StoreDeps
 
@@ -205,6 +212,7 @@ export class Store {
       queued: [],
       commandLog: [],
       canCommand: false,
+      modOutdated: false,
     }
   }
 
@@ -676,6 +684,26 @@ export class Store {
   setCommands(sessionId: string, commands: CommandInfo[]): void {
     this.#commands.set(sessionId, commands)
     if (commands.length > 0) this.#latestCommands = commands
+
+    // A reloaded mod lists the commands from its fresh start. The old one
+    // that ran /reload-plugins never reports back, so this closes it.
+    const reloads = (this.#commandsOut.get(sessionId) ?? []).flatMap(item => (item.taken && item.command === RELOAD_COMMAND ? [item.id] : []))
+
+    for (const id of reloads) this.commandResult({ sessionId, id, command: RELOAD_COMMAND, args: '', text: '' })
+  }
+
+  // What the mod polling for a session says it is (null: older than 0.5.2).
+  noteMod(sessionId: string, version: string | null): void {
+    if (version === null) this.#modVersions.delete(sessionId)
+    else this.#modVersions.set(sessionId, version)
+  }
+
+  setInstalledMod(version: string | null): void {
+    this.#installedMod = version
+  }
+
+  #modOutdated(sessionId: string, now: number): boolean {
+    return this.#installedMod !== null && this.#modAlive(sessionId, now) && this.#modVersions.get(sessionId) !== this.#installedMod
   }
 
   // A list kept from before the bridge started.
@@ -728,7 +756,8 @@ export class Store {
 
     const session = this.sessions.get(sessionId)
 
-    if (session === undefined) return false
+    // Logged already (a reload closed it before the old mod answered).
+    if (session === undefined || session.commandLog.some(entry => entry.id === id)) return false
 
     const text = str(body, 'text') ?? ''
     const result: CommandResult = {
@@ -828,6 +857,7 @@ export class Store {
         this.#outgoing.delete(session.id)
         this.#commandsOut.delete(session.id)
         this.#commands.delete(session.id)
+        this.#modVersions.delete(session.id)
         removed.push(session.id)
       }
     }
@@ -865,6 +895,7 @@ export class Store {
           : `${session.name} · ${session.id.slice(0, 4)}`,
       canPrompt: this.#modAlive(session.id, now),
       canCommand: this.#modAlive(session.id, now) && (this.#commands.has(session.id) || this.#latestCommands !== null),
+      modOutdated: this.#modOutdated(session.id, now),
       queued: [
         ...(this.#outgoing.get(session.id) ?? []).map(item => ({ text: item.text, mode: item.mode })),
         ...(this.#commandsOut.get(session.id) ?? []).map(item => ({ text: `/${item.command}${item.args === '' ? '' : ` ${item.args}`}`, mode: 'command' as const })),

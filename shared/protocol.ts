@@ -207,6 +207,9 @@ export type Session = {
   // True once the mod listed the session's slash commands, so "/name" sent
   // from a device runs as a command instead of reaching Claude as text.
   canCommand: boolean
+  // The session runs an older companion mod than the one installed on its
+  // PC; /reload-plugins brings it up to date.
+  modOutdated: boolean
 }
 
 // How a prompt meets a turn that is still running: steer (the turn stops once

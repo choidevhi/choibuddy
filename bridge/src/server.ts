@@ -13,7 +13,7 @@ import { SessionMeta } from './meta.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
 import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
 import { baseName, type FileReader, languageOf } from './previews.ts'
-import { parseHookInput, parseSlash, type Revival, Store } from './store.ts'
+import { parseHookInput, parseSlash, RELOAD_COMMAND, type Revival, Store } from './store.ts'
 import { ownDevice, plainIp, readStatus, Tailnet } from './tailnet.ts'
 import { purgeTrash } from './trash.ts'
 
@@ -36,6 +36,11 @@ const PAIRING_TTL_MS = 30 * 60_000
 const LAST_SEEN_SAVE_MS = 60_000
 // How long Claude's browser_view call waits for the widget to answer.
 const BROWSER_WAIT_MS = 15_000
+// How often the installed mod's version is read again.
+const MOD_CHECK_MS = 30_000
+// Claude Code's own commands that run as commands even before a session has
+// listed its commands (an older mod never does after a bridge restart).
+const ALWAYS_COMMANDS = new Set(['exit', 'reload-plugins'])
 const PROJECT_LIMIT = 30
 const PROJECT_AGE_MS = 60 * 24 * 60 * 60_000
 // One code per device and address at a time, however often it asks.
@@ -50,6 +55,14 @@ export type BridgeHealth = { pcId: string; version: string; trustTailnet: boolea
 
 // Another of the person's PCs on the tailnet with a bridge on it.
 export type FoundBridge = { name: string; baseUrl: string; pcId: string; version: string; trustTailnet: boolean }
+
+function readModVersion(path: string): string | null {
+  try {
+    return str(parseJsonObject(readFileSync(path, 'utf8')), 'version')
+  } catch {
+    return null
+  }
+}
 
 function readCommands(path: string): CommandInfo[] {
   try {
@@ -116,6 +129,8 @@ export type BridgeOptions = {
   bindTailnet?: boolean
   // The last command list, kept across restarts; defaults to commands.json beside the uploads folder.
   commandsPath?: string
+  // The installed companion mod's manifest, for its version.
+  modManifest?: string
   // Names and archive flags; defaults to sessions.json beside the uploads folder.
   metaPath?: string
   // Who is on the tailnet (tests hand in a made-up one).
@@ -280,6 +295,18 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const commandsPath = options.commandsPath ?? join(options.uploadsDir, '..', 'commands.json')
 
   store.seedCommands(readCommands(commandsPath))
+
+  const modManifest = options.modManifest ?? join(homedir(), '.claude', 'local-mods', 'choibuddy', '.claude-plugin', 'plugin.json')
+  let modReadAt = 0
+
+  // Read again now and then: installing a new version changes it under us.
+  const checkInstalledMod = (): void => {
+    if (now() - modReadAt < MOD_CHECK_MS) return
+    modReadAt = now()
+    store.setInstalledMod(readModVersion(modManifest))
+  }
+
+  checkInstalledMod()
 
   // Where a session the bridge lost left off, read from its transcript.
   const revival = (sessionId: string): Revival | null => {
@@ -602,6 +629,9 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     if (path === '/mod/poll') {
       const sessionId = str(parsed, 'sessionId')
+
+      checkInstalledMod()
+      if (sessionId !== null) store.noteMod(sessionId, str(parsed, 'mod'))
 
       // Claude Code is open for this session even when the bridge lost it.
       if (sessionId !== null && store.revive(sessionId, () => revival(sessionId))) {
@@ -989,7 +1019,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       // "/name args" for a command the session offers runs as that command;
       // anything else (also "/" followed by an unknown name) is a prompt.
       const slash = parseSlash(text)
-      const known = slash !== null && store.commandsFor(sessionId).some(command => command.name === slash.command)
+      const known = slash !== null && (ALWAYS_COMMANDS.has(slash.command) || store.commandsFor(sessionId).some(command => command.name === slash.command))
       const requested = str(parsed, 'mode') ?? ''
       const mode: PromptMode = PROMPT_MODES.find(item => item === requested) ?? 'steer'
       const result = slash !== null && known ? store.queueCommand(sessionId, slash.command, slash.args) : store.queuePrompt(sessionId, text, mode)
@@ -1078,6 +1108,28 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       }
 
       sendJson(res, 200, { ok: true, changed: meta.setArchived(ended, bool(parsed, 'archived') ?? true) })
+
+      return
+    }
+
+    // Loads the session's plugins again, the same as typing /reload-plugins
+    // there: a session started before the mod was updated picks it up.
+    if (req.method === 'POST' && url.pathname === '/api/sessions/reload') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      const sessionId = str(body === null ? null : parseJsonObject(body), 'sessionId') ?? ''
+      const session = store.sessions.get(sessionId)
+
+      if (session === undefined || session.status === 'ended') {
+        sendJson(res, 404, { ok: false, error: 'not open' })
+
+        return
+      }
+
+      const result = store.queueCommand(sessionId, RELOAD_COMMAND, '')
+
+      log(`reload plugins in ${sessionId}: ${result}`)
+      scheduleSnapshot()
+      sendJson(res, result === 'queued' ? 200 : 409, result === 'queued' ? { ok: true } : { ok: false, error: result })
 
       return
     }

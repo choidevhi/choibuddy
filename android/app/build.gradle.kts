@@ -40,8 +40,8 @@ android {
         applicationId = "com.choidev.choibuddy"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.6.2"
+        versionCode = 18
+        versionName = "0.6.3"
     }
 
     signingConfigs {

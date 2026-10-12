@@ -335,6 +335,12 @@ export async function archiveSessions(connection: Connection, sessionIds: string
 export type EndResult = 'sent' | 'no-mod' | 'failed'
 
 // Asks Claude Code on the PC to close the session (/exit).
+// /reload-plugins in the session, run once it is idle: an older mod picks
+// up the installed one.
+export async function reloadPlugins(connection: Connection, sessionId: string): Promise<boolean> {
+  return (await post(connection, '/api/sessions/reload', { sessionId }))?.ok === true
+}
+
 export async function endSession(connection: Connection, sessionId: string): Promise<EndResult> {
   const res = await post(connection, '/api/sessions/end', { sessionId })
 

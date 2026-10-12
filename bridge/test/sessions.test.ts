@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -76,6 +76,8 @@ async function withBridge(health: Record<string, BridgeHealth>, body: (setup: Se
     log: () => {},
     bindTailnet: false,
     read: () => null,
+    commandsPath: join(root, 'commands.json'),
+    modManifest: join(root, 'no-mod.json'),
     tailscale: new Tailnet(() => Promise.resolve(JSON.stringify(STATUS)), Date.now),
     probe: baseUrl => {
       probed.push(baseUrl)
@@ -229,6 +231,7 @@ test('a session whose command list was lost borrows the newest one, and the list
       bindTailnet: false,
       read: () => null,
       commandsPath,
+      modManifest: join(root, 'no-mod.json'),
     })
   const first = await start()
   const one = `http://127.0.0.1:${first.port}`
@@ -298,4 +301,72 @@ test('another device of the person can answer browser_view, and a terminal needs
     assert.equal(terminal.status, 400)
     assert.equal(str(terminal.json, 'error'), 'no such folder')
   })
+})
+
+test('a session on an older mod is flagged, and reloading its plugins goes through without a command list', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-reload-'))
+  const modManifest = join(root, 'plugin.json')
+
+  writeFileSync(modManifest, JSON.stringify({ name: 'choibuddy', version: '0.5.2' }))
+
+  const bridge = await startBridge({
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false },
+    saveConfig: () => {},
+    galleryDir: join(root, 'gallery'),
+    uploadsDir: join(root, 'uploads'),
+    docBackupDir: join(root, 'backups'),
+    claudeDir: join(root, 'claude'),
+    log: () => {},
+    bindTailnet: false,
+    read: () => null,
+    commandsPath: join(root, 'commands.json'),
+    modManifest,
+  })
+  const url = `http://127.0.0.1:${bridge.port}`
+  const session = async (): Promise<JsonObject> => objects(arr((await api(url, '/api/snapshot')).json, 'sessions'))[0] ?? {}
+
+  try {
+    await hook(url, { hook_event_name: 'SessionStart', session_id: 's1', source: 'startup' })
+    // A mod from before 0.5.2 polls without saying its version.
+    await api(url, '/mod/poll', { sessionId: 's1' }, {})
+    assert.equal(bool(await session(), 'modOutdated'), true)
+    assert.equal(bool(await session(), 'canCommand'), false)
+
+    // Typed or picked from the menu, /reload-plugins runs as a command.
+    await api(url, '/api/prompt', { sessionId: 's1', text: '/reload-plugins' })
+    assert.equal((await api(url, '/api/sessions/reload', { sessionId: 's1' })).status, 200)
+    assert.equal((await api(url, '/api/sessions/reload', { sessionId: 'nope' })).status, 404)
+
+    const handed = objects(arr((await api(url, '/mod/poll', { sessionId: 's1' }, {})).json, 'commands'))
+
+    assert.deepEqual(
+      handed.map(item => str(item, 'command')),
+      ['reload-plugins', 'reload-plugins'],
+    )
+
+    // The reloaded mod starts over: it says its version and lists the
+    // commands, which closes the reloads the old one never answered.
+    await api(url, '/mod/poll', { sessionId: 's1', mod: '0.5.2' }, {})
+    await api(url, '/mod/commands', { sessionId: 's1', commands: [{ name: 'reload-plugins', description: 'Reload plugins', source: 'builtin' }] }, {})
+
+    const after = await session()
+
+    assert.equal(bool(after, 'modOutdated'), false)
+    assert.equal(bool(after, 'canCommand'), true)
+    assert.deepEqual(arr(after, 'queued'), [])
+    assert.equal(objects(arr(after, 'commandLog')).length, 2)
+
+    // The old mod answering late adds nothing.
+    await api(url, '/mod/command-result', { sessionId: 's1', id: str(handed[0] ?? {}, 'id') ?? '', command: 'reload-plugins', args: '', text: 'late' }, {})
+    assert.equal(objects(arr(await session(), 'commandLog')).length, 2)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test('the mod reports the version its manifest has', () => {
+  const source = readFileSync(new URL('../../mod/hooks/register.ts', import.meta.url), 'utf8')
+  const version = str(parseJsonObject(readFileSync(new URL('../../mod/.claude-plugin/plugin.json', import.meta.url), 'utf8')), 'version')
+
+  assert.ok(version !== null && source.includes(`const MOD_VERSION = '${version}'`), `MOD_VERSION should be ${version}`)
 })
