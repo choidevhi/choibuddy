@@ -33,6 +33,7 @@ Claude Code ──hooks (HTTP)──────▶ bridge (Node, on the PC) ─
 - **Terminal.** The terminal button above the session list opens a terminal on that PC (WezTerm, Windows Terminal or cmd), even when you press it on the phone.
 - **Steering.** A prompt sent while Claude works can **steer in** (it lands as soon as the current tool finishes, and Claude carries on with it), wait until **after this task**, or **stop and send**.
 - **Slash commands.** Type `/` for the session's commands. They run as commands and their output shows in the chat.
+- **Auto language.** Turn it on in settings and, when Claude answers in a language other than the app's, ChoiBuddy asks the session once to restate the answer in yours (never a restatement again). It applies to every connected PC.
 - **New sessions.** Pick a PC, a folder and a first prompt, and Claude Code opens in a new terminal on that PC.
 
 ![A browser beside the session. Claude sees it too](promo/en/03-browser.png)
@@ -110,7 +111,8 @@ corepack pnpm uninstall-bridge   # removes the hooks and stops the bridge
 - **Docs tab.** It only reads and writes instruction files with known names, by their id from the list, up to 1 MB. Each file is backed up to `~/.choibuddy/doc-backups` before it is saved. Instruction files change how Claude behaves, so a device with a code has that much power too.
 - **Auto Accept.** It lives in memory only, so it turns off when the bridge restarts. It allows ordinary permission requests only; questions and plans always need a person.
 - **Connecting Tailscale devices automatically.** Off unless you turn it on for this PC. A device then gets a code of its own only over Tailscale, and only when Tailscale says it is signed in to the same account as this PC. Devices shared with you and tagged devices are left out. Each one shows in the device list and can be cut off, and turning the option off cuts all of them. Anyone who can sign in to your Tailscale account could connect, so keep that account safe.
-- **Ending a session** and **reloading its plugins** send `/exit` and `/reload-plugins` through the companion mod, the same as typing them in the terminal. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
+- **Ending a session** and **reloading its plugins** send `/exit` and `/reload-plugins` through the companion mod, the same as typing them in the terminal.
+- **Auto language** reads only the reply text Claude Code hands to its Stop hook, decides the language on the bridge (code, paths and links left out), and sends one prompt through the companion mod. Any connected device may turn it on or off. Names and the archive live in `~/.choibuddy/sessions.json`; Claude Code's transcripts are not changed.
 - **New sessions and terminals.** A terminal opens only when the folder exists, and it starts without going through a shell (the program and its arguments are passed separately). A device with a code can open a terminal window on the PC, but cannot type into it.
 - **Built-in browser.** Pages get no access to the app's IPC; a page can only send the app the element you picked and its address. Claude's `browser_view` calls are answered by a connected ChoiBuddy app with its browser open (this PC's, or another PC's that has this one connected); the first answer counts. A device that may send prompts may show Claude a page too. An app whose browser is closed waits 3 seconds before saying so, so an open one answers first.
 

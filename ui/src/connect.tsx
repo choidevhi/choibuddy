@@ -6,7 +6,7 @@ import { showToast } from './confirm.tsx'
 import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
 import { ago, duration, isLang, type Lang, LANGS, type MessageKey, type Translate, useI18n } from './i18n.ts'
 import { CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
-import { createDevice, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, setTrustTailnet, type SetupStatus } from './live.ts'
+import { createDevice, fetchSetup, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setTrustTailnet, type SetupStatus } from './live.ts'
 import { parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
 import { usePref } from './prefs.ts'
@@ -559,6 +559,15 @@ export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourc
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [doneAlerts, setDoneAlerts] = useState(() => window.ChoiBuddyNative?.doneAlerts() ?? true)
   const [notifications, setNotifications] = useState(() => window.ChoiBuddyNative?.notificationsAllowed() ?? true)
+  // On when every connected PC asks again in this app's language.
+  const autoLanguage = feeds.length > 0 && feeds.every(feed => feed.snapshot?.server.autoLanguage === lang)
+  const langName = LANGS.find(item => item.id === lang)?.label ?? lang
+
+  const changeAutoLanguage = async (on: boolean): Promise<void> => {
+    const results = await Promise.all(feeds.map(feed => setAutoLanguage(feed.connection, on ? lang : null)))
+
+    if (results.includes(false)) showToast(t('settings.autoLanguageFailed'))
+  }
 
   useEffect(() => {
     if (platform === 'windows') void windowsShell.autostart().then(setAutostart, () => setAutostart(null))
@@ -645,6 +654,12 @@ export function Connect({ feeds, now, localFeed, prefs, onPrefs, onLang, onSourc
             onChange={setPromptMode}
           />
         </div>
+        <Toggle
+          label={t('settings.autoLanguage')}
+          hint={t('settings.autoLanguageHint', { lang: langName })}
+          on={autoLanguage}
+          onChange={on => void changeAutoLanguage(on)}
+        />
         {platform === 'windows' && (
           <>
             <Toggle label={t('settings.float')} hint={t('settings.floatHint')} on={prefs.float} onChange={on => onPrefs({ ...prefs, float: on })} />

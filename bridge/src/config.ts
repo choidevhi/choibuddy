@@ -1,3 +1,4 @@
+import { type Lang, parseLang } from './language.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -11,7 +12,7 @@ export const CONFIG_PATH = join(HOME_DIR, 'config.json')
 
 export const LOG_PATH = join(HOME_DIR, 'bridge.log')
 
-export const VERSION = '0.6.3'
+export const VERSION = '0.6.4'
 
 // A phone or another PC paired with this bridge. Only a hash of its code is
 // kept, and each one can be cut off on its own.
@@ -35,6 +36,8 @@ export type Config = {
   // The person's own Tailscale devices may connect without a code. Off
   // unless turned on in the danger zone.
   trustTailnet: boolean
+  // Replies in another language are asked again in this one; null: off.
+  autoLanguage: Lang | null
 }
 
 export function hashToken(token: string): string {
@@ -86,6 +89,7 @@ export function loadConfig(): Config {
     pcId: pcId ?? randomBytes(6).toString('hex'),
     devices: parseDevices(stored),
     trustTailnet: bool(stored, 'trustTailnet') ?? false,
+    autoLanguage: parseLang(str(stored, 'autoLanguage')),
   }
 
   if (config.token !== token || pcId === null) saveConfig(config)

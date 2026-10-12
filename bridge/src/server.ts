@@ -8,6 +8,7 @@ import { type Config, type Device, hashToken, newToken, VERSION } from './config
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
+import { AutoLanguage, parseLang } from './language.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
@@ -328,6 +329,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const trashDir = options.trashDir ?? join(options.uploadsDir, '..', 'trash')
   // In memory only: a restarted bridge always starts with this off.
   let autoAcceptUntil = 0
+  const autoLanguage = new AutoLanguage()
   // First prompts for sessions opened from a device, waiting for them to start.
   const launchPrompts: LaunchPrompt[] = []
   // Claude's browser_view calls waiting for the widget's answer.
@@ -349,6 +351,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     version: VERSION,
     autoAcceptUntil: autoAcceptUntil > now() ? autoAcceptUntil : 0,
     trustTailnet: config.trustTailnet,
+    autoLanguage: config.autoLanguage,
   })
 
   // The person's other PCs with a bridge, found on the tailnet; this one left out.
@@ -509,6 +512,15 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     }
 
     const result = store.apply(input)
+
+    if (input.event === 'UserPromptSubmit') autoLanguage.onPrompt(input.sessionId, str(input.raw, 'prompt') ?? '')
+
+    // A reply in another language than the person's: ask for it again in theirs.
+    if (input.event === 'Stop') {
+      const ask = autoLanguage.onStop(input.sessionId, str(input.raw, 'last_assistant_message') ?? '', config.autoLanguage)
+
+      if (ask !== null) log(`auto language: asked ${input.sessionId} again (${store.queuePrompt(input.sessionId, ask, 'queue')})`)
+    }
 
     sendJson(res, 200, {})
     for (const id of result.cleared) finish(id, {})
@@ -870,6 +882,28 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       }
 
       sendJson(res, 200, setupStatus(options.claudeDir))
+
+      return
+    }
+
+    // Any device may turn it on (in its own language) or off.
+    if (req.method === 'POST' && url.pathname === '/api/auto-language') {
+      const body = await readBody(req, API_BODY_LIMIT)
+      // An empty or missing language turns it off.
+      const requested = str(body === null ? null : parseJsonObject(body), 'lang') ?? ''
+      const lang = parseLang(requested)
+
+      if (lang === null && requested !== '') {
+        sendJson(res, 400, { ok: false, error: 'unknown language' })
+
+        return
+      }
+
+      config.autoLanguage = lang
+      options.saveConfig(config)
+      log(`auto language ${lang ?? 'off'}`)
+      scheduleSnapshot()
+      sendJson(res, 200, { ok: true, autoLanguage: lang })
 
       return
     }

@@ -64,7 +64,7 @@ type Setup = { url: string; claudeDir: string; config: Config; probed: string[] 
 async function withBridge(health: Record<string, BridgeHealth>, body: (setup: Setup) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'choibuddy-sessions-'))
   const claudeDir = join(root, 'claude')
-  const config: Config = { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false }
+  const config: Config = { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null }
   const probed: string[] = []
   const bridge = await startBridge({
     config,
@@ -221,7 +221,7 @@ test('a session whose command list was lost borrows the newest one, and the list
   const commandsPath = join(root, 'commands.json')
   const start = (): ReturnType<typeof startBridge> =>
     startBridge({
-      config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false },
+      config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
       saveConfig: () => {},
       galleryDir: join(root, 'gallery'),
       uploadsDir: join(root, 'uploads'),
@@ -310,7 +310,7 @@ test('a session on an older mod is flagged, and reloading its plugins goes throu
   writeFileSync(modManifest, JSON.stringify({ name: 'choibuddy', version: '0.5.2' }))
 
   const bridge = await startBridge({
-    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false },
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null },
     saveConfig: () => {},
     galleryDir: join(root, 'gallery'),
     uploadsDir: join(root, 'uploads'),

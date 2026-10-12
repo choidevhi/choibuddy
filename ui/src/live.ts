@@ -354,6 +354,11 @@ export async function openTerminal(connection: Connection, cwd: string): Promise
   return (await post(connection, '/api/terminal/open', { cwd }))?.ok === true
 }
 
+// Replies in another language are asked again in `lang` (null: off).
+export async function setAutoLanguage(connection: Connection, lang: string | null): Promise<boolean> {
+  return (await post(connection, '/api/auto-language', { lang: lang ?? '' }))?.ok === true
+}
+
 export async function setTrustTailnet(connection: Connection, on: boolean): Promise<boolean> {
   return (await post(connection, '/api/tailnet/trust', { on }))?.ok === true
 }

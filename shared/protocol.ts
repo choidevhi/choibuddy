@@ -339,6 +339,9 @@ export type ServerInfo = {
   autoAcceptUntil: number
   // The person's own Tailscale devices connect without a code.
   trustTailnet: boolean
+  // A reply in another language is asked again in this one (ko, en, ja,
+  // fr); null: off.
+  autoLanguage: string | null
 }
 
 export type Snapshot = {
