@@ -4314,6 +4314,10 @@ body.resizing--column {
   }
 }
 
+.term-host {
+  height: 100%;
+}
+
 .term-screen .xterm {
   height: 100%;
 }

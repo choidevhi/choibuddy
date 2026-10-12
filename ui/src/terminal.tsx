@@ -144,7 +144,11 @@ function TerminalView({ connection, term, dark, keys }: { connection: Connection
 
   return (
     <div className="term-view">
-      <div className="term-screen" ref={host} />
+      {/* xterm's fit measures the element around the terminal, padding and
+          border included, so that element is a bare one inside the frame. */}
+      <div className="term-screen">
+        <div className="term-host" ref={host} />
+      </div>
       {keys && (
         <div className="term-keys">
           {KEYS.map(([label, data]) => (
