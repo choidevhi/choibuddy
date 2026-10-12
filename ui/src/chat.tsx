@@ -784,7 +784,7 @@ function ConversationPane(props: PaneProps) {
           </div>
         ) : missing ? (
           <div className="empty">
-            <div className="empty-sub">{t('chat.noTranscript')}</div>
+            <div className="empty-sub">{live?.agent === 'codex' && live.canPrompt ? t('chat.codexWaiting') : t('chat.noTranscript')}</div>
           </div>
         ) : shown === null ? (
           <div className="empty">

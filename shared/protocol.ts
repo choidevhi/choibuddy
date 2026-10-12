@@ -182,7 +182,8 @@ export type HistoryEntry = {
 export type SessionStatus = 'thinking' | 'working' | 'waiting' | 'done' | 'idle' | 'error' | 'ended'
 
 // Which coding agent runs the session. Codex reports through its hooks only:
-// no prompts, commands or live text from a device.
+// no live text or usage, and prompts only when it runs in one of the app's
+// terminals (typed in there).
 export type AgentKind = 'claude' | 'codex'
 
 export type Session = {

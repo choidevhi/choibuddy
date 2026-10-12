@@ -84,7 +84,8 @@ try {
     const res = await fetch(`${base}/hook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...hook, agent: 'codex' }),
+      // The terminal of the app Codex runs in, if any: its session takes the place shown for it.
+      body: JSON.stringify({ ...hook, agent: 'codex', choibuddy_term: process.env.CHOIBUDDY_TERM ?? null }),
       signal: AbortSignal.timeout(asking ? APPROVAL_WAIT_MS : 2000),
     })
     const answer = asking ? codexAnswer(parseJsonObject(await res.text())) : ''

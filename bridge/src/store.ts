@@ -42,6 +42,11 @@ export type HookInput = {
   raw: JsonObject
 }
 
+// Folders compared the way Windows does: case and slashes aside.
+function sameFolder(path: string): string {
+  return path.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase()
+}
+
 export function parseHookInput(raw: JsonObject): HookInput | null {
   const event = str(raw, 'hook_event_name')
   const sessionId = str(raw, 'session_id')
@@ -169,6 +174,12 @@ export class Store {
   // The mod version each session reported (mods before 0.5.2 report none),
   // and the one installed on this PC.
   readonly #modVersions = new Map<string, string>()
+  // Sessions running in one of this PC's terminals (opened from the app),
+  // by session: typing into the terminal is how they take a prompt.
+  readonly #terminalOf = new Map<string, string>()
+  // A Codex session that started in such a terminal, by Codex's own id: it
+  // takes the place the app showed for the terminal, under that id.
+  readonly #aliases = new Map<string, string>()
   #installedMod: string | null = null
   readonly #agentModels = new Map<string, string>()
   readonly #deps: StoreDeps
@@ -226,6 +237,71 @@ export class Store {
     const model = str(raw, 'model')
 
     if (session.agent === 'codex' && model !== null && model !== session.usage?.model) session.usage = { ...this.#usageOf(session), model }
+  }
+
+  // Codex opened in one of this PC's terminals: shown at once, before Codex
+  // reports anything (it starts its session with the first message).
+  addTerminalSession(termId: string, cwd: string): string {
+    const id = `term-${termId}`
+
+    this.sessions.set(id, this.#create(id, cwd, 'default', this.#deps.now(), 'codex'))
+    this.#terminalOf.set(id, termId)
+
+    return id
+  }
+
+  // The app's place for a Codex terminal that no Codex session took yet:
+  // the terminal itself named it (`termId`), or else the oldest in `cwd`.
+  waitingTerminalSession(termId: string | null, cwd: string): string | null {
+    const taken = new Set(this.#aliases.values())
+    const folder = sameFolder(cwd)
+    let found: Session | null = null
+
+    for (const [sessionId, term] of this.#terminalOf) {
+      const session = this.sessions.get(sessionId)
+
+      if (session === undefined || taken.has(sessionId) || !sessionId.startsWith('term-')) continue
+      if (termId !== null && term === termId) return sessionId
+      if (termId === null && sameFolder(session.cwd) === folder && (found === null || session.startedAt < found.startedAt)) found = session
+    }
+
+    return found?.id ?? null
+  }
+
+  // Whether a hook's session id is one this store already follows.
+  follows(sessionId: string): boolean {
+    return this.sessions.has(sessionId) || this.#aliases.has(sessionId)
+  }
+
+  alias(sessionId: string, shownId: string): void {
+    this.#aliases.set(sessionId, shownId)
+  }
+
+  // A hook as this store files it: under the place it took, if any.
+  resolve(input: HookInput): HookInput {
+    const shown = this.#aliases.get(input.sessionId)
+
+    return shown === undefined ? input : { ...input, sessionId: shown }
+  }
+
+  terminalOf(sessionId: string): string | undefined {
+    return this.#terminalOf.get(sessionId)
+  }
+
+  // The terminal closed: its sessions take no more prompts, and a place no
+  // Codex session ever took goes away.
+  terminalGone(termId: string): boolean {
+    const taken = new Set(this.#aliases.values())
+    let changed = false
+
+    for (const [sessionId, term] of [...this.#terminalOf]) {
+      if (term !== termId) continue
+      this.#terminalOf.delete(sessionId)
+      changed = true
+      if (!taken.has(sessionId) && sessionId.startsWith('term-')) this.sessions.delete(sessionId)
+    }
+
+    return changed
   }
 
   #create(id: string, cwd: string, mode: string, at: number, agent: AgentKind = 'claude'): Session {
@@ -934,8 +1010,8 @@ export class Store {
 
     for (const session of this.sessions.values()) {
       const ttl = session.status === 'ended' ? ENDED_TTL_MS : IDLE_TTL_MS
-      // Quiet for hours, but Claude Code is still open: keep it.
-      const open = session.status !== 'ended' && this.#modAlive(session.id, now)
+      // Quiet for hours, but Claude Code (or a terminal of the app) is still open: keep it.
+      const open = session.status !== 'ended' && (this.#modAlive(session.id, now) || this.#terminalOf.has(session.id))
 
       if (!open && now - session.updatedAt > ttl && this.#pendingOf(session.id).length === 0) {
         this.sessions.delete(session.id)
@@ -979,10 +1055,10 @@ export class Store {
         this.#names.has(session.id) || counts.get(this.#nameOf(session)) === 1
           ? this.#nameOf(session)
           : `${session.name} · ${session.id.slice(0, 4)}`,
-      canPrompt: this.#modAlive(session.id, now),
+      canPrompt: this.#modAlive(session.id, now) || this.#terminalOf.has(session.id),
       canCommand: this.#modAlive(session.id, now) && (this.#commands.has(session.id) || this.#latestCommands !== null),
       modOutdated: this.#modOutdated(session.id, now),
-      canStop: this.#modAlive(session.id, now) && modAtLeast(this.#modVersions.get(session.id), STOP_MOD),
+      canStop: (this.#modAlive(session.id, now) && modAtLeast(this.#modVersions.get(session.id), STOP_MOD)) || this.#terminalOf.has(session.id),
       queued: [
         ...(this.#outgoing.get(session.id) ?? []).map(item => ({ text: item.text, mode: item.mode })),
         ...(this.#commandsOut.get(session.id) ?? []).map(item => ({ text: `/${item.command}${item.args === '' ? '' : ` ${item.args}`}`, mode: 'command' as const })),

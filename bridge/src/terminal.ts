@@ -38,7 +38,17 @@ export type TermInfo = {
 
 type Listener = { data: (chunk: string) => void; exit: (code: number) => void }
 
-type Term = TermInfo & { pty: Pty; backlog: string; listeners: Set<Listener> }
+// `paste`: the program in it asked for pastes marked as such (bracketed
+// paste), so typed text with line breaks goes in as one message.
+type Term = TermInfo & { pty: Pty; backlog: string; listeners: Set<Listener>; paste: boolean }
+
+// What a program running in the terminal is told about it, so ChoiBuddy's
+// Codex hooks can name the terminal their session runs in.
+export const TERM_ENV = 'CHOIBUDDY_TERM'
+// Esc first (Codex stops on it), then the message once that settled.
+const ESC_SETTLE_MS = 300
+// The paste is read before Enter sends it.
+const ENTER_AFTER_MS = 60
 
 // Output kept for a screen that joins later.
 const BACKLOG_CHARS = 256 * 1024
@@ -153,13 +163,18 @@ export class Terminals {
     if (this.#terms.size >= MAX_TERMS) return 'too many terminals'
 
     const path = freshPath()
-    const env = path === null ? { ...process.env } : { ...process.env, Path: path, PATH: path }
+    const id = randomUUID().slice(0, 8)
+    const env = path === null ? { ...process.env, [TERM_ENV]: id } : { ...process.env, Path: path, PATH: path, [TERM_ENV]: id }
     const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL ?? '/bin/bash')
     const args = process.platform === 'win32' ? ['-NoLogo'] : ['-l']
     const pty = this.#pty.spawn(shell, args, { name: 'xterm-256color', cols: clampSize(input.cols, MAX_COLS), rows: clampSize(input.rows, MAX_ROWS), cwd, env })
-    const term: Term = { id: randomUUID().slice(0, 8), title: input.title, cwd, run: input.run, startedAt: this.#now(), exitCode: null, exited: false, pty, backlog: '', listeners: new Set() }
+    const term: Term = { id, title: input.title, cwd, run: input.run, startedAt: this.#now(), exitCode: null, exited: false, pty, backlog: '', listeners: new Set(), paste: false }
 
     pty.onData(data => {
+      const pasteOn = data.lastIndexOf('\x1b[?2004h')
+      const pasteOff = data.lastIndexOf('\x1b[?2004l')
+
+      if (pasteOn !== pasteOff) term.paste = pasteOn > pasteOff
       term.backlog = (term.backlog + data).slice(-BACKLOG_CHARS)
       for (const listener of term.listeners) listener.data(data)
     })
@@ -193,6 +208,49 @@ export class Terminals {
 
     if (term === undefined || term.exited) return false
     term.pty.resize(clampSize(cols, MAX_COLS), clampSize(rows, MAX_ROWS))
+
+    return true
+  }
+
+  // Types a message into the program running in the terminal (Codex) and
+  // sends it with Enter: as one paste when the program takes pastes, else on
+  // one line. Control characters go, so the message can only be text.
+  // `interrupt` presses Esc first, which stops Codex's running turn.
+  type(id: string, text: string, interrupt: boolean): boolean {
+    const term = this.#terms.get(id)
+
+    if (term === undefined || term.exited) return false
+
+    const plain = text.replace(/\t/g, ' ').replace(/\r\n?/g, '\n').replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '')
+    const body = term.paste ? `\x1b[200~${plain}\x1b[201~` : plain.replace(/\n/g, ' ')
+
+    const go = (): void => {
+      term.pty.write(body)
+      setTimeout(() => {
+        if (!term.exited) term.pty.write('\r')
+      }, ENTER_AFTER_MS)
+    }
+
+    if (!interrupt) {
+      go()
+
+      return true
+    }
+
+    term.pty.write('\x1b')
+    setTimeout(() => {
+      if (!term.exited) go()
+    }, ESC_SETTLE_MS)
+
+    return true
+  }
+
+  // Esc, which stops what the program in the terminal is doing.
+  escape(id: string): boolean {
+    const term = this.#terms.get(id)
+
+    if (term === undefined || term.exited) return false
+    term.pty.write('\x1b')
 
     return true
   }

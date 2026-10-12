@@ -9,7 +9,7 @@ import { type Config, type Device, hashToken, newToken, VERSION } from './config
 import { arr, asObject, bool, type JsonObject, num, obj, objects, parseJsonObject, str, strings } from './json.ts'
 import { Docs } from './docs.ts'
 import { Gallery } from './gallery.ts'
-import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, type CodexTrust, codexTrust, setCodexHooks } from './codex.ts'
+import { CODEX_TOOLS, codexCommand, codexHooksCurrent, type CodexState, codexState, type CodexTools, type CodexTrust, codexTrust, fromCodex, setCodexHooks } from './codex.ts'
 import { AutoLanguage, parseLang } from './language.ts'
 import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
@@ -556,7 +556,20 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const handleHook = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const body = await readBody(req, HOOK_BODY_LIMIT)
     const raw = body === null ? null : parseJsonObject(body)
-    const input = raw === null ? null : parseHookInput(raw)
+    const parsed = raw === null ? null : parseHookInput(raw)
+
+    // A Codex session that started in one of this PC's terminals takes the
+    // place the app showed for that terminal.
+    if (parsed !== null && fromCodex(parsed.raw) && !store.follows(parsed.sessionId)) {
+      const shown = store.waitingTerminalSession(str(parsed.raw, 'choibuddy_term'), parsed.cwd)
+
+      if (shown !== null) {
+        store.alias(parsed.sessionId, shown)
+        log(`codex session ${parsed.sessionId} started in terminal ${store.terminalOf(shown) ?? '?'}`)
+      }
+    }
+
+    const input = parsed === null ? null : store.resolve(parsed)
 
     if (input === null) {
       sendJson(res, 200, {})
@@ -1149,12 +1162,26 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
         return
       }
 
+      const requestedMode = str(parsed, 'mode') ?? ''
+      const term = store.terminalOf(sessionId)
+
+      // A session in one of this PC's terminals (Codex) takes it typed in,
+      // its own slash commands too; "stop and send" presses Esc first.
+      if (term !== undefined) {
+        const typed = terminals.type(term, text, requestedMode === 'interrupt')
+
+        if (typed) sendUploads(sessionId, text)
+        log(`prompt typed into terminal ${term} for ${sessionId}: ${typed ? 'ok' : 'gone'}`)
+        sendJson(res, typed ? 200 : 409, { ok: typed, result: typed ? 'queued' : 'no-mod' })
+
+        return
+      }
+
       // "/name args" for a command the session offers runs as that command;
       // anything else (also "/" followed by an unknown name) is a prompt.
       const slash = parseSlash(text)
       const known = slash !== null && (ALWAYS_COMMANDS.has(slash.command) || store.commandsFor(sessionId).some(command => command.name === slash.command))
-      const requested = str(parsed, 'mode') ?? ''
-      const mode: PromptMode = PROMPT_MODES.find(item => item === requested) ?? 'steer'
+      const mode: PromptMode = PROMPT_MODES.find(item => item === requestedMode) ?? 'steer'
       const result = slash !== null && known ? store.queueCommand(sessionId, slash.command, slash.args) : store.queuePrompt(sessionId, text, mode)
 
       if (result === 'queued') sendUploads(sessionId, text)
@@ -1273,6 +1300,17 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     if (req.method === 'POST' && url.pathname === '/api/sessions/stop') {
       const body = await readBody(req, API_BODY_LIMIT)
       const sessionId = str(body === null ? null : parseJsonObject(body), 'sessionId') ?? ''
+      const term = store.terminalOf(sessionId)
+
+      if (term !== undefined) {
+        const pressed = terminals.escape(term)
+
+        log(`stop ${sessionId}: Esc into terminal ${term}`)
+        sendJson(res, pressed ? 200 : 409, pressed ? { ok: true } : { ok: false, error: 'no-mod' })
+
+        return
+      }
+
       const result = store.askStop(sessionId)
 
       log(`stop ${sessionId}: ${result}`)
@@ -1410,6 +1448,18 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
         // Claude Code gets its first prompt through the mod once it starts.
         if (run === 'claude' && prompt !== '') launchPrompts.push({ cwd: opened.cwd, text: prompt, at: now() })
 
+        // Codex shows at once; it starts its own session with the first message.
+        if (run === 'codex') {
+          store.addTerminalSession(opened.id, opened.cwd)
+          terminals.follow(opened.id, {
+            data: () => {},
+            exit: () => {
+              if (store.terminalGone(opened.id)) scheduleSnapshot()
+            },
+          })
+          scheduleSnapshot()
+        }
+
         log(`terminal ${opened.id} (${run}) in ${opened.cwd}`)
         sendJson(res, 200, { ok: true, terminal: opened })
 
@@ -1429,6 +1479,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       }
 
       if (req.method === 'POST' && url.pathname === '/api/term/close') {
+        if (store.terminalGone(id)) scheduleSnapshot()
         sendJson(res, terminals.close(id) ? 200 : 404, {})
 
         return

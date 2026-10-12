@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { type JsonObject, obj, objects, arr, parseJsonObject, str } from '../src/json.ts'
+import { arr, bool, type JsonObject, obj, objects, parseJsonObject, str } from '../src/json.ts'
 import { startBridge } from '../src/server.ts'
 import { codexLine, Terminals } from '../src/terminal.ts'
 
@@ -132,4 +132,92 @@ test('the line that starts Codex is quoted for the shell it is typed into', () =
   // macOS and Linux: POSIX single quotes, where only ' itself needs care.
   assert.equal(codexLine(['/opt/homebrew/bin/codex', '--no-daemon'], prompt, 'darwin'), "/opt/homebrew/bin/codex --no-daemon 'it'\\''s ’quoted’ $(rm -rf ~) ; next line'")
   assert.equal(codexLine(['/Users/Kim Lee/bin/codex'], '', 'darwin'), "'/Users/Kim Lee/bin/codex'")
+})
+
+test('Codex opened in a terminal shows at once, takes prompts typed in, and its session takes that place', { skip: process.platform !== 'win32' }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'choibuddy-term-codex-session-'))
+  // Stands in for Codex: echoes each line typed into it.
+  const fake = join(root, 'codex.cmd')
+
+  writeFileSync(fake, '@powershell -NoProfile -Command "while ($true) { $line = [Console]::ReadLine(); if ($line -eq $null) { break }; Write-Output (\'GOT:\' + $line) }"\r\n')
+
+  const bridge = await startBridge({
+    config: { port: 0, token: TOKEN, pcId: 'pc-self', devices: [], trustTailnet: false, autoLanguage: null, remoteTerminal: false },
+    saveConfig: () => {},
+    galleryDir: join(root, 'gallery'),
+    uploadsDir: join(root, 'uploads'),
+    docBackupDir: join(root, 'backups'),
+    claudeDir: join(root, 'claude'),
+    log: () => {},
+    bindTailnet: false,
+    read: () => null,
+    modManifest: join(root, 'no-mod.json'),
+    codexTools: { cli: () => [fake], app: () => null, install: async () => false, command: () => true, launchArgs: () => [] },
+  })
+  const url = `http://127.0.0.1:${bridge.port}`
+  const headers = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+  const post = async (path: string, body: JsonObject): Promise<number> => (await fetch(`${url}${path}`, { method: 'POST', headers, body: JSON.stringify(body) })).status
+  const sessions = async (): Promise<JsonObject[]> => objects(arr(parseJsonObject(await (await fetch(`${url}/api/snapshot`, { headers })).text()), 'sessions'))
+  const hook = (payload: JsonObject): Promise<Response> => fetch(`${url}/hook`, { method: 'POST', body: JSON.stringify({ cwd: root, permission_mode: 'default', agent: 'codex', ...payload }) })
+
+  try {
+    const opened = parseJsonObject(await (await fetch(`${url}/api/term/open`, { method: 'POST', headers, body: JSON.stringify({ cwd: root, run: 'codex', cols: 120, rows: 30 }) })).text())
+    const id = str(obj(opened, 'terminal'), 'id') ?? ''
+    const shown = `term-${id}`
+    const placed = (await sessions()).find(session => str(session, 'id') === shown)
+
+    // Shown before Codex reports anything, ready for a prompt and a stop.
+    assert.equal(str(placed ?? null, 'agent'), 'codex')
+    assert.equal(bool(placed ?? null, 'canPrompt'), true)
+    assert.equal(bool(placed ?? null, 'canStop'), true)
+
+    const reader = (await fetch(`${url}/api/term/stream?id=${id}&token=${TOKEN}`)).body?.getReader()
+    const decoder = new TextDecoder()
+    let seen = ''
+
+    assert.ok(reader)
+    await new Promise(resolve => setTimeout(resolve, 2500))
+    assert.equal(await post('/api/prompt', { sessionId: shown, text: 'hello codex' }), 200)
+
+    const until = Date.now() + 15_000
+
+    while (!seen.includes('GOT:hello codex') && Date.now() < until) {
+      const { value, done } = await reader.read()
+
+      if (done) break
+      seen += decoder.decode(value)
+    }
+
+    assert.ok(seen.includes('GOT:hello codex'), 'the prompt was typed into the terminal')
+    await reader.cancel()
+
+    // Codex starts its session: it lands in the place shown, under its id.
+    await hook({ hook_event_name: 'SessionStart', session_id: 'cx-real', source: 'startup', choibuddy_term: id })
+    await hook({ hook_event_name: 'UserPromptSubmit', session_id: 'cx-real', prompt: 'hello codex', choibuddy_term: id })
+
+    const after = await sessions()
+
+    assert.deepEqual(
+      after.map(session => str(session, 'id')),
+      [shown],
+    )
+    assert.equal(str(after[0] ?? null, 'status'), 'thinking')
+    assert.equal(await post('/api/sessions/stop', { sessionId: shown }), 200)
+
+    // The terminal closed: the session stays, typing into it does not.
+    assert.equal(await post('/api/term/close', { id }), 200)
+    assert.equal(bool((await sessions())[0] ?? null, 'canPrompt'), false)
+
+    // A Codex terminal closed before Codex started leaves nothing behind.
+    const second = str(obj(parseJsonObject(await (await fetch(`${url}/api/term/open`, { method: 'POST', headers, body: JSON.stringify({ cwd: root, run: 'codex' }) })).text()), 'terminal'), 'id') ?? ''
+
+    assert.equal((await sessions()).length, 2)
+    assert.equal(await post('/api/term/close', { id: second }), 200)
+    assert.deepEqual(
+      (await sessions()).map(session => str(session, 'id')),
+      [shown],
+    )
+  } finally {
+    await bridge.close()
+  }
 })

@@ -401,3 +401,22 @@ test('mod versions compare by their numbers', () => {
   assert.equal(modAtLeast(undefined, [0, 5, 3]), false)
   assert.equal(modAtLeast('beta', [0, 5, 3]), false)
 })
+
+test('a Codex session without its terminal named takes the oldest waiting place in its folder', () => {
+  const { store, tick } = makeStore()
+  const first = store.addTerminalSession('t1', 'C:\\work\\Shop')
+
+  tick(1000)
+  store.addTerminalSession('t2', 'C:\\work\\shop')
+  tick(1000)
+  store.addTerminalSession('t3', 'C:\\other')
+
+  // Folders compare as Windows does: case and slashes aside.
+  assert.equal(store.waitingTerminalSession(null, 'c:/work/shop/'), first)
+  store.alias('cx-1', first)
+  assert.equal(store.waitingTerminalSession(null, 'C:\\work\\shop'), 'term-t2')
+  assert.equal(store.waitingTerminalSession('t3', 'C:\\work\\shop'), 'term-t3')
+  assert.equal(store.waitingTerminalSession(null, 'C:\\elsewhere'), null)
+  assert.equal(store.follows('cx-1'), true)
+  assert.equal(store.resolve(hook('Stop', {}, 'cx-1')).sessionId, first)
+})
