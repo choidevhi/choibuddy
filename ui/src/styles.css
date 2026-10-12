@@ -233,18 +233,24 @@ button:disabled {
   color: var(--accent);
 }
 
-/* Phones: the top bar always fits the screen, never a page that scrolls
-   sideways. The tab buttons give way first (down to 26px each); with every
-   badge up on a small phone, the tools wrap to a second line. */
+/* Phones: never a page that scrolls sideways. The tab buttons give way
+   first (down to 26px each); on a phone too small even for that, the top
+   bar scrolls sideways inside itself. */
 @media (max-width: 480px) {
   .topbar {
-    flex-wrap: wrap;
     gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .topbar::-webkit-scrollbar {
+    display: none;
   }
 
   .tabs {
     flex: 1 1 172px;
-    min-width: 0;
+    min-width: min-content;
     max-width: max-content;
   }
 
@@ -256,6 +262,13 @@ button:disabled {
 
   .dots {
     min-width: 0;
+  }
+
+  .pending-badge,
+  .auto-badge,
+  .tools {
+    flex: none;
+    white-space: nowrap;
   }
 
   .tools {
