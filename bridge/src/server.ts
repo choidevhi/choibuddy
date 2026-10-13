@@ -706,6 +706,12 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     if (fromCodex(input.raw)) readCodexRecord(input.sessionId)
     if (input.event === 'UserPromptSubmit') autoLanguage.onPrompt(input.sessionId, str(input.raw, 'prompt') ?? '')
 
+    // The prompt and the turn's reply go to the chat at once, before the
+    // transcript file (which can lag, or stop) has them.
+    const said = input.event === 'UserPromptSubmit' ? userText(str(input.raw, 'prompt') ?? '') : input.event === 'Stop' ? (str(input.raw, 'last_assistant_message') ?? '').trim() : ''
+
+    if (said !== null && said !== '') liveChats.heard(input.sessionId, { role: input.event === 'Stop' ? 'assistant' : 'user', text: said, at: now() })
+
     // A reply in another language than the person's: ask for it again in theirs.
     if (input.event === 'Stop') {
       const ask = autoLanguage.onStop(input.sessionId, str(input.raw, 'last_assistant_message') ?? '', config.autoLanguage)

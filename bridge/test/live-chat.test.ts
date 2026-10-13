@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ChatDraft, ChatMessage, ChatPatch } from '../../shared/protocol.ts'
-import { LEGACY, LiveChats, withEngineTail } from '../src/live-chat.ts'
+import { LEGACY, LiveChats, withEngineTail, withHeard } from '../src/live-chat.ts'
 
 // A transcript the test grows by hand, and every event the bridge would send.
 function setup() {
@@ -174,4 +174,24 @@ test('messages Claude Code has but the transcript lacks are filled in after its 
   // Caught up, or nothing in common: the transcript alone.
   assert.equal(withEngineTail(file, engine.slice(0, 3), 5), file)
   assert.equal(withEngineTail(file, [{ role: 'user', text: 'other' }], 5), file)
+})
+
+test('a prompt or reply a hook told shows at once, once', () => {
+  const file = [{ id: 'n1', role: 'note' as const, text: 'compacted', at: 100 }]
+  const heard = [
+    { role: 'user' as const, text: 'is it instant now?', at: 200 },
+    { role: 'assistant' as const, text: 'Yes.', at: 300 },
+    { role: 'user' as const, text: 'older than the file', at: 50 },
+  ]
+
+  assert.deepEqual(withHeard(file, heard).map(message => [message.role, message.text]), [
+    ['note', 'compacted'],
+    ['user', 'is it instant now?'],
+    ['assistant', 'Yes.'],
+  ])
+
+  // The transcript caught up: nothing twice.
+  const caught = [...file, { id: 'u2', role: 'user' as const, text: 'is it instant now?', at: 210 }, { id: 'a2', role: 'assistant' as const, text: 'Yes.', at: 290 }]
+
+  assert.equal(withHeard(caught, heard), caught)
 })

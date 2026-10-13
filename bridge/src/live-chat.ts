@@ -46,6 +46,36 @@ export function withEngineTail(messages: readonly ChatMessage[], tail: readonly 
   return [...messages, ...tail.slice(at + 1).map((item, index) => ({ id: `engine-${messages.length + index}`, role: item.role, text: item.text, at: now }))]
 }
 
+// A prompt or a turn's last reply as a hook told it, with when.
+export type HeardMessage = EngineMessage & { at: number }
+
+// The most heard messages kept per session, and how far back the
+// conversation is searched for one already there.
+const HEARD_KEPT = 20
+const HEARD_LOOKBACK = 6
+
+// What the hooks just told (the prompt as it went in, the turn's last
+// reply), shown at once after the conversation's last message until the
+// transcript or the mod's list has it: a sent message shows up at once,
+// whatever the transcript file or the mod is doing.
+export function withHeard(messages: readonly ChatMessage[], heard: readonly HeardMessage[]): readonly ChatMessage[] {
+  const last = messages.at(-1)
+  const since = last?.at ?? 0
+  const recent = messages.slice(-HEARD_LOOKBACK).map(message => squash(message.text))
+  const added: ChatMessage[] = []
+
+  for (const item of heard) {
+    const text = squash(item.text)
+
+    if (item.at <= since || text === '' || recent.some(seen => seen.includes(text))) continue
+
+    added.push({ id: `heard-${messages.length + added.length}`, role: item.role, text: item.text, at: item.at })
+    recent.push(text)
+  }
+
+  return added.length === 0 ? messages : [...messages, ...added]
+}
+
 export type LiveChatDeps = {
   // The session's messages as the transcript has them now (read again on
   // each call), or null when it has no transcript yet.
@@ -85,6 +115,7 @@ export class LiveChats {
   // The key of the draft each session settled last.
   readonly #settled = new Map<string, string>()
   readonly #engine = new Map<string, readonly EngineMessage[]>()
+  readonly #heard = new Map<string, HeardMessage[]>()
 
   constructor(deps: LiveChatDeps) {
     this.#deps = deps
@@ -143,6 +174,14 @@ export class LiveChats {
     this.sync(sessionId)
   }
 
+  // A hook said it just now: a prompt that went in, or a turn's last reply.
+  heard(sessionId: string, message: HeardMessage): void {
+    const list = [...(this.#heard.get(sessionId) ?? []), message].slice(-HEARD_KEPT)
+
+    this.#heard.set(sessionId, list)
+    this.sync(sessionId)
+  }
+
   // Claude Code's own last messages, from the mod.
   engine(sessionId: string, tail: readonly EngineMessage[]): void {
     this.#engine.set(sessionId, tail)
@@ -151,6 +190,7 @@ export class LiveChats {
 
   forget(sessionId: string): void {
     this.#engine.delete(sessionId)
+    this.#heard.delete(sessionId)
     this.#sent.delete(sessionId)
     this.#settled.delete(sessionId)
     if (this.#drafts.delete(sessionId)) this.#clear(sessionId)
@@ -188,7 +228,7 @@ export class LiveChats {
   #messages(sessionId: string): readonly ChatMessage[] | null {
     const messages = this.#deps.messages(sessionId)
 
-    return messages === null ? null : withEngineTail(messages, this.#engine.get(sessionId) ?? [], this.#deps.now())
+    return messages === null ? null : withHeard(withEngineTail(messages, this.#engine.get(sessionId) ?? [], this.#deps.now()), this.#heard.get(sessionId) ?? [])
   }
 
   // What a screen that just connected needs: every draft, whole.
