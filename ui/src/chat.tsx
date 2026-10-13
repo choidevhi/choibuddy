@@ -899,7 +899,8 @@ function ConversationPane(props: PaneProps) {
                   {result.text !== '' ? (
                     <pre className="command-output">{result.text}</pre>
                   ) : (
-                    result.failed && <div className="command-output command-output--note">{t('command.unanswered')}</div>
+                    // Claude Code lets no plugin end its session: /exit has to be typed there.
+                    result.failed && <div className="command-output command-output--note">{t(result.command === 'exit' ? 'command.exitRefused' : 'command.unanswered')}</div>
                   )}
                 </div>
               </div>

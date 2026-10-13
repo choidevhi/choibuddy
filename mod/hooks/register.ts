@@ -11,7 +11,7 @@ const BRIDGE = 'http://127.0.0.1:47130'
 const POLL_MS = 500
 // Sent with every poll, so the bridge can tell a session that still runs an
 // older copy of this mod. Kept equal to .claude-plugin/plugin.json.
-const MOD_VERSION = '0.5.4'
+const MOD_VERSION = '0.5.5'
 const BROWSER_TOOL = 'browser_view'
 
 type UsageReport = {
@@ -112,7 +112,21 @@ export function joinPrompts(prompts: QueuedPrompt[]): string {
 // The main loop's running turn, and messages waiting for it to reach a tool
 // boundary. (Text riding along with a tool result is not used: Claude rightly
 // treats instructions found in tool output as untrusted.)
-let runningTurn: string | null = null
+// Kept in the session's state, not a module variable: /reload-plugins in
+// the middle of a turn starts the module over, and "send now" must still
+// know which turn to stop.
+const RUNNING_TURN = { plugin: 'choibuddy', key: 'turn' } as const
+
+async function runningTurn($: EngineInterface): Promise<string | null> {
+  const { value = null } = await $.state.get(RUNNING_TURN)
+
+  return value
+}
+
+async function setRunningTurn($: EngineInterface, turnId: string | null): Promise<void> {
+  await $.state.set(RUNNING_TURN, turnId)
+}
+
 const steering: QueuedPrompt[] = []
 // The gap between a tool result going in and the turn being stopped, so the
 // result is recorded first.
@@ -125,7 +139,7 @@ async function steerNow($: EngineInterface, sessionId: string): Promise<void> {
 
   if (taken.length === 0) return
 
-  const turnId = runningTurn
+  const turnId = await runningTurn($)
 
   if (turnId !== null) await $.turn.abort({ turnId }).catch(() => undefined)
   void send($, '/mod/steered', JSON.stringify({ sessionId, ids: taken.map(prompt => prompt.id) }))
@@ -203,17 +217,19 @@ async function poll($: EngineInterface, sessionId: string): Promise<void> {
 
   if (reply === null) return
 
+  const running = await runningTurn($)
+
   // Messages sent before the stop still go next, as after Esc.
-  if (stopAsked(reply) && runningTurn !== null) await $.turn.abort({ turnId: runningTurn }).catch(() => undefined)
+  if (stopAsked(reply) && running !== null) await $.turn.abort({ turnId: running }).catch(() => undefined)
 
   for (const prompt of promptsOf(reply)) {
     // With no turn running every mode simply starts one.
-    if (runningTurn !== null && prompt.mode === 'steer') {
+    if (running !== null && prompt.mode === 'steer') {
       steering.push(prompt)
       continue
     }
 
-    if (runningTurn !== null && prompt.mode === 'interrupt') await $.turn.abort({ turnId: runningTurn }).catch(() => undefined)
+    if (running !== null && prompt.mode === 'interrupt') await $.turn.abort({ turnId: running }).catch(() => undefined)
     // A queued one becomes its own turn once the session is idle.
     await $.prompt.submit({ text: prompt.text, asUser: true })
   }
@@ -338,7 +354,7 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    runningTurn = e.turnId
+    await setRunningTurn($, e.turnId)
 
     return next(e)
   })
@@ -346,8 +362,8 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.agentId === undefined && e.turnId === runningTurn) {
-      runningTurn = null
+    if (e.agentId === undefined && e.turnId === (await runningTurn($))) {
+      await setRunningTurn($, null)
       // A turn that ended before reaching a tool boundary: the messages start
       // the next one.
       if (steering.length > 0) await steerNow($, await $.session.id().catch(() => ''))
@@ -362,7 +378,7 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
 
-    if (e.agentId === undefined && steering.length > 0 && runningTurn !== null) {
+    if (e.agentId === undefined && steering.length > 0 && (await runningTurn($)) !== null) {
       const sessionId = await $.session.id().catch(() => '')
 
       $.clock.after(STEER_AFTER_MS, () => void steerNow($, sessionId))
