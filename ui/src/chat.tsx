@@ -6,9 +6,11 @@ import { Buddy, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type MessageKey, useI18n } from './i18n.ts'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
-import { ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, StopIcon, TrashIcon, XIcon } from './icons.tsx'
+import { ArrowUpIcon, ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, StopIcon, TrashIcon, XIcon } from './icons.tsx'
 import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
+import { patchConversation } from './chat-patch.ts'
+import { useDraft, useEpoch, usePatches } from './live-chat.ts'
 import { deleteConversation, fetchConversation, fetchGallery, reloadPlugins, type Uploaded } from './live.ts'
 import { attachedName, attachmentNote, splitAttachments } from './attachments.ts'
 import { Markdown } from './markdown.tsx'
@@ -50,7 +52,6 @@ export function withPictures(messages: ChatMessage[], pictures: GalleryImage[], 
   return items
 }
 // How long a finished reply waits on screen for the transcript to catch up.
-const HOLD_REPLY_MS = 20_000
 const MAX_SUGGESTIONS = 8
 
 export type UploadFn = (sessionId: string, file: File) => Promise<Uploaded | null>
@@ -354,18 +355,9 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
           ))}
         </div>
       )}
-      {busy && (
-        <div className="composer-mode" title={t('settings.promptModeHint')}>
-          <span className="composer-mode-label">{t('mode.label')}</span>
-          <Picker
-            className="composer-mode-select"
-            value={mode}
-            title={t('settings.promptMode')}
-            options={PICKED_MODES.map(item => ({ value: item, label: t(MODE_LABEL[item]) }))}
-            onChange={setMode}
-          />
-        </div>
-      )}
+      {/* One card: the words on top, every button on the row under them, so
+          the box takes as little of the conversation as it can. */}
+      <div className={`composer ${compact ? 'composer--compact' : ''}`}>
       {files.length > 0 && (
         <div className="attachments">
           {files.map(file => (
@@ -394,15 +386,6 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
           ))}
         </div>
       )}
-      <div className={`composer ${compact ? 'composer--compact' : ''}`}>
-        <button type="button" className="icon-btn attach-btn" disabled={!ready} onClick={() => picker.current?.click()} title={t('chat.attach')}>
-          <PaperclipIcon size={17} />
-        </button>
-        {canClipboard && (
-          <button type="button" className="icon-btn attach-btn" disabled={!ready} onClick={pasteClipboard} title={t('chat.clipboard')}>
-            <ClipboardIcon size={17} />
-          </button>
-        )}
         <input
           ref={picker}
           type="file"
@@ -447,21 +430,41 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
             }
           }}
         />
-        {busy && (
-          <button type="button" className="btn btn--deny composer-stop" onClick={() => askStop(session.id)} title={t('chat.stopHint')} aria-label={t('chat.stop')}>
-            <StopIcon size={14} />
-            {t('chat.stop')}
+        <div className="composer-row">
+          <button type="button" className="icon-btn composer-tool" disabled={!ready} onClick={() => picker.current?.click()} title={t('chat.attach')} aria-label={t('chat.attach')}>
+            <PaperclipIcon size={18} />
           </button>
-        )}
-        <button
-          type="button"
-          className="btn btn--allow"
-          disabled={!ready || sending || uploading || text === ''}
-          title={busy ? t('chat.sendNowHint') : undefined}
-          onClick={() => void send()}
-        >
-          {t('action.send')}
-        </button>
+          {canClipboard && (
+            <button type="button" className="icon-btn composer-tool" disabled={!ready} onClick={pasteClipboard} title={t('chat.clipboard')} aria-label={t('chat.clipboard')}>
+              <ClipboardIcon size={18} />
+            </button>
+          )}
+          {busy && (
+            <Picker
+              className="composer-mode-select"
+              value={mode}
+              title={t('settings.promptModeHint')}
+              options={PICKED_MODES.map(item => ({ value: item, label: t(MODE_LABEL[item]) }))}
+              onChange={setMode}
+            />
+          )}
+          <span className="composer-gap" />
+          {busy && (
+            <button type="button" className="composer-round composer-stop" onClick={() => askStop(session.id)} title={t('chat.stopHint')} aria-label={t('chat.stop')}>
+              <StopIcon size={15} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="composer-round composer-send"
+            disabled={!ready || sending || uploading || text === ''}
+            title={busy ? t('chat.sendNowHint') : t('action.send')}
+            aria-label={t('action.send')}
+            onClick={() => void send()}
+          >
+            {sending ? <SpinnerIcon size={16} /> : <ArrowUpIcon size={18} />}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -501,7 +504,8 @@ function ConversationPane(props: PaneProps) {
   // ask from there, so new messages are added and none slide off the top.
   const [from, setFrom] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<'ask' | 'busy' | null>(null)
-  const [held, setHeld] = useState<{ text: string; at: number } | null>(null)
+  // Bumped to read the page again (a patch could not be applied).
+  const [reread, setReread] = useState(0)
   // Prompts on their way in, one bubble each until the transcript has them.
   const [outbox, setOutbox] = useState<OutPrompt[]>([])
   const scroller = useRef<HTMLDivElement>(null)
@@ -551,29 +555,61 @@ function ConversationPane(props: PaneProps) {
 
   useEffect(() => {
     setFrom(null)
-    setHeld(null)
     setOutbox([])
     pinnedToBottom.current = true
     setAway(false)
   }, [sessionId])
 
-  // Live sessions refresh whenever they move; a short delay lets the
-  // transcript catch up with the hook that announced the change.
+  // The bridge pushes what a live conversation gains (bridge 0.9.0 on); the
+  // page is read when the session or its bridge's stream (re)opens. Older
+  // bridges are read again whenever the session moves.
+  const pushes = feed?.snapshot?.server.chatPush === true
+  const feedKey = feed?.key ?? null
+  const epoch = useEpoch(feedKey)
+  const moved = pushes ? 0 : (live?.updatedAt ?? 0)
+
   useEffect(() => {
     if (feed === null || sessionId === null) return
 
     const connection = feed.connection
-    const timer = window.setTimeout(() => {
-      void fetchConversation(connection, sessionId, PAGE, from).then(next => {
-        setMissing(next === null)
-        if (next === null) return
-        setConversation(next)
-        if (from === null) setFrom(next.start)
-      })
-    }, 400)
+    const timer = window.setTimeout(
+      () => {
+        void fetchConversation(connection, sessionId, PAGE, from).then(next => {
+          setMissing(next === null)
+          if (next === null) return
+          // A reply that left before patches newer than it came in is old.
+          setConversation(current => (current !== null && current.sessionId === next.sessionId && current.start === next.start && current.total > next.total ? current : next))
+          if (from === null) setFrom(next.start)
+        })
+      },
+      pushes ? 0 : 400,
+    )
 
     return () => window.clearTimeout(timer)
-  }, [feed?.key, feed?.connection.token, sessionId, from, live?.updatedAt, live?.status])
+  }, [feed?.key, feed?.connection.token, sessionId, from, epoch, reread, moved, pushes ? '' : live?.status])
+
+  // The conversation as patches last left it: two patches can arrive before
+  // React draws the first.
+  const latest = useRef<Conversation | null>(null)
+
+  latest.current = conversation
+
+  usePatches(feedKey, sessionId, patch => {
+    const current = latest.current
+
+    if (current === null || current.sessionId !== patch.sessionId) return
+
+    const next = patchConversation(current, patch)
+
+    if (next === null) {
+      setReread(count => count + 1)
+
+      return
+    }
+
+    latest.current = next
+    setConversation(next)
+  })
 
   const shown = conversation?.sessionId === sessionId ? conversation : null
   const working = live !== null && (live.status === 'thinking' || live.status === 'working' || live.status === 'waiting')
@@ -589,21 +625,13 @@ function ConversationPane(props: PaneProps) {
     if (!text.startsWith('/')) setOutbox(current => [...current, outPrompt(crypto.randomUUID(), text, mode, shown?.messages ?? null, Date.now())])
     followBottom()
   }
-  // Claude's reply as it is being written.
-  const typing =
-    working && stream !== undefined && stream.toolUseId === null && now - stream.at < 15_000 ? `${stream.skippedLines > 0 ? '…\n' : ''}${stream.text}` : ''
-
-  // The reply stays on screen after the stream moves on (to a tool, or the
-  // turn ends) until the transcript has it, so it never blinks out.
-  useEffect(() => {
-    if (typing !== '') setHeld({ text: typing, at: Date.now() })
-  }, [typing])
-
-  const heldHead = held === null ? '' : held.text.replace(/^…\n/, '').trim().slice(0, 80)
-  const settled = held !== null && shown !== null && shown.messages.some(message => message.role === 'assistant' && message.text.trim().startsWith(heldHead))
-  const lingering = held !== null && !settled && now - held.at < HOLD_REPLY_MS ? held.text : ''
+  // Claude's reply as it is being written. The bridge drops it only once
+  // the transcript, already patched in above, holds it: it never blinks out
+  // and never shows twice. An older bridge only has the raw stream.
+  const draft = useDraft(feedKey, sessionId)
+  const legacy = !pushes && working && stream !== undefined && stream.toolUseId === null && now - stream.at < 15_000 ? stream.text : ''
   // Word by word, like the terminal.
-  const typed = useTypewriter(typing !== '' ? typing : lingering)
+  const typed = useTypewriter(pushes ? (draft ?? '') : legacy)
 
   // Loading older messages keeps what was on screen where it was.
   useLayoutEffect(() => {
@@ -938,11 +966,13 @@ function ConversationPane(props: PaneProps) {
             </button>
           </div>
         )}
-        {entry !== null && (
+        {/* A live session's folder is in the head above; the row stays for a
+            past one, where it carries the delete button. */}
+        {entry !== null && live === null && (
           <div className="convo-path-row">
             <span className="convo-path">
               {entry.cwd}
-              {live !== null && ` · ${t('chat.tools', { n: live.toolCount })}`}
+
             </span>
             {canDelete && (
               <button type="button" className="btn small convo-delete" onClick={() => setDeleting('ask')}>

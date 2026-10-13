@@ -7,6 +7,7 @@ import { type CommandsFn, Composer, type UploadFn } from './chat.tsx'
 import { ago, duration, useI18n } from './i18n.ts'
 import { BanIcon, CheckCircleIcon, KindIcon, PlusIcon, SpinnerIcon, XCircleIcon } from './icons.tsx'
 import { CodexModel, CodexModelControl, ModelControl, modelLabel } from './model.tsx'
+import { useDraft } from './live-chat.ts'
 import { LiveCodeView, LiveReplyView, MessageView, PreviewView } from './preview.tsx'
 import { UsageStrip } from './usage.tsx'
 
@@ -65,6 +66,8 @@ const LIVE_MS = 15_000
 type HomeProps = {
   session: Session | null
   stream: LiveStream | null
+  // The PC the session is on, for the reply its bridge pushes as a draft.
+  pcKey: string | null
   sessions: Session[]
   limits: Limits | null
   look: Look
@@ -135,7 +138,7 @@ function SessionPicker({ session, sessions, onPick, onNewSession }: PickerProps)
   )
 }
 
-export function Home({ session, stream, sessions, limits, look, tone, now, compact, short, onPick, onSend, onUpload, loadCommands, onNewSession }: HomeProps) {
+export function Home({ session, stream, pcKey, sessions, limits, look, tone, now, compact, short, onPick, onSend, onUpload, loadCommands, onNewSession }: HomeProps) {
   const { t } = useI18n()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -176,9 +179,12 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
     !session.steps.some(step => step.id === stream.toolUseId)
       ? stream
       : null
-  // The agent writing its answer (no tool yet): shown as it comes, word by word.
-  const replying =
-    writing === null && stream !== null && stream.toolUseId === null && busy && now - stream.at < LIVE_MS && stream.text.trim() !== '' ? stream : null
+  // The agent writing its answer (no tool yet): shown as it comes, word by
+  // word. The bridge's draft when it pushes one (0.9.0 on), else the stream.
+  const draft = useDraft(pcKey, session?.id ?? null)
+  const streamed = stream !== null && stream.toolUseId === null && now - stream.at < LIVE_MS ? stream.text : ''
+  const reply = draft ?? streamed
+  const replying = writing === null && busy && reply.trim() !== '' ? reply : null
   // Codex names its model in its hooks (as it is); Claude's reads as "Opus 5.5".
   const model = session?.usage?.model ?? null
   const agentLine = session?.agent === 'codex' ? (model === null ? 'Codex' : `Codex · ${model}`) : (modelLabel(model) ?? 'Claude Code')
@@ -232,7 +238,7 @@ export function Home({ session, stream, sessions, limits, look, tone, now, compa
         {writing !== null && agent === null && selectedId === null ? (
           <LiveCodeView stream={writing} />
         ) : replying !== null && agent === null && selectedId === null ? (
-          <LiveReplyView stream={replying} title={t(session?.agent === 'codex' ? 'home.replyCodex' : 'home.reply')} />
+          <LiveReplyView text={replying} title={t(session?.agent === 'codex' ? 'home.replyCodex' : 'home.reply')} />
         ) : agent !== null && session !== null ? (
           agentStep !== null && agentStep.preview !== null && (agent.status === 'running' || agent.message === null) ? (
             <PreviewView preview={agentStep.preview} cwd={session.cwd} running={agentStep.status === 'running'} />

@@ -164,6 +164,7 @@ export function HomeScreen({ feeds, streams, sessions, limits, codexLimits, auto
                     <Home
                       session={session}
                       stream={session === null ? null : (streams.get(session.id) ?? null)}
+                      pcKey={feed?.key ?? null}
                       sessions={sessions}
                       limits={limitsFor({ limits, codexLimits }, session)}
                       look={lookFor(session, leaf.sessionId === null ? link : (feed?.link ?? 'offline'), now)}

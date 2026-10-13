@@ -106,9 +106,31 @@ test('코드를 쓰는 중인 도구 입력을 브리지로 흘려보낸다', as
 
   const streamed = sent.filter(item => item.url.endsWith('/mod/stream')).map(item => item.body)
 
-  expect(streamed.length).toBeGreaterThan(0)
-  expect(streamed.at(-1)).toContain('"toolUseId":"tu1"')
-  expect(streamed.at(-1)).toContain('hello')
+  expect(streamed.length).toBeGreaterThan(1)
+  // The last piece of the code, then the step's end with its whole reply.
+  expect(streamed.at(-2)).toContain('"toolUseId":"tu1"')
+  expect(streamed.at(-2)).toContain('hello')
+  expect(JSON.parse(streamed.at(-1) ?? '{}')).toEqual({ sessionId: 'sess-1', key: 't1:0', seq: 1, done: true, answer: '' })
+})
+
+test('답을 쓰는 동안 조각마다 순번을 붙이고, 끝나면 전체 답을 알린다', async ($, on) => {
+  const sent: Sent[] = []
+
+  mock.clock(on, { now: NOW })
+  engineBeneath(on, sent, [], [])
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'text', ref: 1, index: 0, text: '원인은' }
+    yield { kind: 'text', ref: 2, index: 0, text: ' TVA예요.' }
+
+    return { turnId: e.turnId, index: e.index, answer: '원인은 TVA예요.', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+
+  for await (const chunk of $.turn.step({ turnId: 't7', index: 2, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 1 })) expect(chunk).toBeDefined()
+
+  const streamed = sent.filter(item => item.url.endsWith('/mod/stream')).map(item => JSON.parse(item.body))
+
+  expect(streamed.at(0)).toEqual({ sessionId: 'sess-1', key: 't7:2', seq: 1, text: '원인은' })
+  expect(streamed.at(-1)).toEqual({ sessionId: 'sess-1', key: 't7:2', seq: streamed.length, done: true, answer: '원인은 TVA예요.' })
 })
 
 test('브리지 답에서 슬래시 명령을 꺼낸다', () => {

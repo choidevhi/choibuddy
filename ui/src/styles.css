@@ -1707,17 +1707,76 @@ button.step:hover {
 
 /* Prompt composer in the chat tab */
 
+/* One card: the words on top, the buttons on one row under them. */
 .composer {
   display: flex;
-  gap: 8px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 6px 6px 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 18px;
+  background: var(--card);
 }
 
-.composer-input {
-  min-height: 40px;
-  max-height: 120px;
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-line));
+}
+
+.composer .composer-input {
+  min-height: 32px;
+  max-height: 160px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 14px;
   line-height: 1.45;
   field-sizing: content;
+}
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-gap {
+  flex: 1;
+}
+
+.composer-tool:disabled {
+  opacity: 0.4;
+}
+
+.composer-round {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.composer-send {
+  background: var(--text);
+  color: var(--card);
+}
+
+.composer-send:disabled {
+  background: var(--chip);
+  color: var(--muted);
+}
+
+.composer-stop {
+  margin-right: 4px;
+  background: var(--chip);
+  color: var(--text);
+}
+
+.composer-row .composer-mode-select {
+  margin-left: 4px;
+  font-size: 12px;
 }
 
 .composer-off {
@@ -2232,13 +2291,14 @@ button.step:hover {
   background: var(--bad);
 }
 
-.composer--compact .composer-input {
-  min-height: 36px;
-  padding: 8px 12px;
+.composer--compact {
+  padding: 4px 4px 4px 6px;
+  border-radius: 14px;
 }
 
-.composer--compact .btn {
-  padding: 8px 14px;
+.composer--compact .composer-round {
+  width: 28px;
+  height: 28px;
 }
 
 /* Conversation tab: sessions on the left, the whole conversation on the right */
@@ -2363,13 +2423,9 @@ button.step:hover {
 }
 
 /* A long hint must not make the empty prompt box grow. */
-.composer-input:placeholder-shown {
+.composer .composer-input:placeholder-shown {
   field-sizing: fixed;
-  height: 40px;
-}
-
-.composer--compact .composer-input:placeholder-shown {
-  height: 36px;
+  height: 32px;
 }
 
 .composer-input::placeholder {
@@ -4381,12 +4437,6 @@ body.resizing--column {
   gap: 6px;
   font-size: 13px;
   line-height: 1.5;
-}
-
-.composer-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .mod-notice-close {

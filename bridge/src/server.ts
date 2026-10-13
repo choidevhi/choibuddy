@@ -16,6 +16,7 @@ import { AutoLanguage, parseLang } from './language.ts'
 import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
+import { LEGACY, LiveChats } from './live-chat.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
 import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
 import { baseName, type FileReader, languageOf } from './previews.ts'
@@ -39,6 +40,8 @@ const KEPT_CHATS = 30
 const CODEX_IMAGES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 // A working Codex session's record is read this often (pictures, usage).
 const CODEX_READ_MS = 2_000
+// Open conversations' transcripts are read this often for what they gained.
+const CHAT_TICK_MS = 250
 const PRUNE_MS = 60_000
 const TAILNET_CHECK_MS = 30_000
 const PREVIEW_FILE_LIMIT = 1_000_000
@@ -481,6 +484,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     autoAcceptUntil: autoAcceptUntil > now() ? autoAcceptUntil : 0,
     trustTailnet: config.trustTailnet,
     autoLanguage: config.autoLanguage,
+    chatPush: true,
   })
 
   // The person's other PCs with a bridge, found on the tailnet; this one left out.
@@ -557,6 +561,28 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   const sendEvent = (event: string, data: string): void => {
     for (const client of clients.keys()) client.write(`event: ${event}\ndata: ${data}\n\n`)
   }
+
+  // Where each session's transcript is, once found (a search of the project
+  // folders is too slow to repeat four times a second).
+  const chatPaths = new Map<string, string>()
+
+  const chatPath = (sessionId: string): string | null => {
+    const known = chatPaths.get(sessionId) ?? transcripts.find(sessionId, store.transcriptPath(sessionId))
+
+    if (known !== null) chatPaths.set(sessionId, known)
+
+    return known
+  }
+
+  const liveChats = new LiveChats({
+    messages: sessionId => {
+      const path = chatPath(sessionId)
+
+      return path === null ? null : transcripts.reader(path).messages
+    },
+    emit: sendEvent,
+    now,
+  })
 
   const flushSnapshot = (): void => {
     snapshotTimer = null
@@ -738,8 +764,10 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
         if (input !== null) applyHook(input)
       },
-      reply: (threadId, text) => {
+      reply: (threadId, itemId, text) => {
         const tail = streamTail(text)
+
+        liveChats.write(threadId, `codex:${itemId}`, null, text)
 
         sendEvent('stream', JSON.stringify({ sessionId: threadId, toolUseId: null, tool: null, path: null, language: 'plain', skippedLines: tail.skippedLines, text: tail.text, at: now() }))
       },
@@ -863,7 +891,15 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const filePath = partialField(json, 'file_path') ?? partialField(json, 'notebook_path')
       const text = field === null ? str(parsed, 'text') : partialField(json, field)
 
-      if (sessionId !== null && text !== null) {
+      // The reply itself (not a tool's input) also goes to the chat as a draft.
+      if (sessionId !== null && tool === null) {
+        const key = str(parsed, 'key') ?? LEGACY
+
+        if (bool(parsed, 'done') === true) liveChats.finish(sessionId, key, str(parsed, 'answer') ?? text ?? '')
+        else if (text !== null) liveChats.write(sessionId, key, num(parsed, 'seq'), text)
+      }
+
+      if (sessionId !== null && text !== null && bool(parsed, 'done') !== true) {
         const tail = streamTail(text)
         const stream: LiveStream = {
           sessionId,
@@ -1052,6 +1088,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
         'X-Accel-Buffering': 'no',
       })
       res.write(`retry: 2000\nevent: snapshot\ndata: ${JSON.stringify(store.snapshot(serverInfo()))}\n\n`)
+      for (const draft of liveChats.drafts()) res.write(`event: draft\ndata: ${JSON.stringify(draft)}\n\n`)
       clients.set(res, caller.device?.id ?? null)
       req.on('close', () => clients.delete(res))
 
@@ -2024,6 +2061,18 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
     setInterval(() => {
       if (store.prune().length > 0) scheduleSnapshot()
     }, PRUNE_MS),
+    setInterval(() => {
+      const open: string[] = []
+
+      for (const session of store.sessions.values()) {
+        if (session.status === 'ended') continue
+        open.push(session.id)
+        // A turn that is over has no reply on its way any more.
+        if (session.status !== 'working' && session.status !== 'thinking') liveChats.end(session.id)
+      }
+
+      liveChats.tick(open)
+    }, CHAT_TICK_MS),
     setInterval(() => {
       if (store.expireCommands()) scheduleSnapshot()
     }, HEARTBEAT_MS),

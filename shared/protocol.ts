@@ -166,6 +166,30 @@ export type Conversation = {
   total: number
 }
 
+// A live conversation's change, pushed as the transcript grows (SSE "chat"):
+// `messages` replace what a screen holds from index `from` on. `reset` says
+// the transcript was rewritten: read the conversation again instead.
+export type ChatPatch = {
+  sessionId: string
+  from: number
+  messages: ChatMessage[]
+  total: number
+  reset: boolean
+}
+
+// The reply being written (SSE "draft"), one per session at most: the whole
+// text, or `append` to grow the draft of the same key that is `offset`
+// characters long (on a mismatch the screen keeps what it has until the next
+// whole one). Both null: gone, because the transcript has it now.
+export type ChatDraft = {
+  sessionId: string
+  key: string
+  text: string | null
+  append: string | null
+  offset: number
+  at: number
+}
+
 // A session found on disk (any time) or live right now.
 export type HistoryEntry = {
   sessionId: string
@@ -363,6 +387,9 @@ export type ServerInfo = {
   // A reply in another language is asked again in this one (ko, en, ja,
   // fr); null: off.
   autoLanguage: string | null
+  // Pushes open conversations as "chat" and "draft" events (bridge 0.9.0
+  // and later); absent on older ones, which a screen reads again on each hook.
+  chatPush?: boolean
 }
 
 export type Snapshot = {

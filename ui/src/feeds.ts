@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type Alert, type BrowserRequest, type Limits, type LiveStream, type Pending, PROTOCOL_VERSION, type Session, type Snapshot } from '../../shared/protocol.ts'
+import { parseDraft, parsePatch } from './chat-patch.ts'
+import { applyChat, applyDraft, reopened } from './live-chat.ts'
 import type { LinkState } from './live.ts'
 import { invoke } from '@tauri-apps/api/core'
 import { type Connection, loadConnection, parseConnection, platform, writePref } from './platform.ts'
@@ -148,6 +150,9 @@ export function useFeeds(sources: Source[], onAlert: (alert: Alert, source: Sour
       let lastSeen = Date.now()
       let retry: number | null = null
       let closed = false
+      // This bridge pushes replies as drafts: its reply streams are left out,
+      // so they do not redraw the whole app many times a second.
+      let pushes = false
       const set = (patch: Partial<FeedState>): void =>
         setStates(current => new Map(current).set(source.key, { ...(current.get(source.key) ?? EMPTY), ...patch }))
       const { baseUrl, token } = source.connection
@@ -160,21 +165,39 @@ export function useFeeds(sources: Source[], onAlert: (alert: Alert, source: Sour
         stream = new EventSource(`${baseUrl}/api/events?token=${encodeURIComponent(token)}`)
         stream.addEventListener('open', () => {
           lastSeen = Date.now()
+          reopened(source.key)
           set({ link: 'live' })
+        })
+        stream.addEventListener('chat', event => {
+          lastSeen = Date.now()
+
+          const patch = parsePatch(event.data)
+
+          if (patch !== null) applyChat(source.key, patch)
+        })
+        stream.addEventListener('draft', event => {
+          lastSeen = Date.now()
+
+          const draft = parseDraft(event.data)
+
+          if (draft !== null) applyDraft(source.key, draft)
         })
         stream.addEventListener('snapshot', event => {
           lastSeen = Date.now()
 
           const next = parseSnapshot(event.data)
 
-          if (next !== null) set({ snapshot: next, link: 'live' })
+          if (next !== null) {
+            pushes = next.server.chatPush === true
+            set({ snapshot: next, link: 'live' })
+          }
         })
         stream.addEventListener('stream', event => {
           lastSeen = Date.now()
 
           const live = parseStream(event.data)
 
-          if (live === null) return
+          if (live === null || (pushes && live.toolUseId === null)) return
           setStates(current => {
             const state = current.get(source.key) ?? EMPTY
 

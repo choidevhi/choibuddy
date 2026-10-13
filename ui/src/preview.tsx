@@ -212,10 +212,10 @@ export function LiveCodeView({ stream }: { stream: LiveStream }) {
 }
 
 // The agent's reply as it is being written, for the home screen.
-export function LiveReplyView({ stream, title }: { stream: LiveStream; title: string }) {
+export function LiveReplyView({ text: target, title }: { text: string; title: string }) {
   const { t } = useI18n()
   const body = useRef<HTMLDivElement>(null)
-  const text = useTypewriter(stream.text)
+  const text = useTypewriter(target)
 
   useEffect(() => {
     if (body.current !== null) body.current.scrollTop = body.current.scrollHeight

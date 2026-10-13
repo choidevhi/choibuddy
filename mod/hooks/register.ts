@@ -11,7 +11,7 @@ const BRIDGE = 'http://127.0.0.1:47130'
 const POLL_MS = 500
 // Sent with every poll, so the bridge can tell a session that still runs an
 // older copy of this mod. Kept equal to .claude-plugin/plugin.json.
-const MOD_VERSION = '0.5.3'
+const MOD_VERSION = '0.5.4'
 const BROWSER_TOOL = 'browser_view'
 
 type UsageReport = {
@@ -244,14 +244,19 @@ type Block = {
 class LiveStreamer {
   readonly #post: (body: string) => void
   readonly #sessionId: string
+  // The step's own name (turn and index), so the bridge knows which reply a
+  // piece belongs to, and a count that orders pieces arriving out of order.
+  readonly #key: string
+  #seq = 0
   readonly #blocks = new Map<number, Block>()
   #text = ''
   #sentAt = 0
   #dirty: 'text' | number | null = null
 
-  constructor(post: (body: string) => void, sessionId: string) {
+  constructor(post: (body: string) => void, sessionId: string, key: string) {
     this.#post = post
     this.#sessionId = sessionId
+    this.#key = key
   }
 
   chunk(chunk: TurnStepChunk): void {
@@ -278,8 +283,11 @@ class LiveStreamer {
     if (Date.now() - this.#sentAt >= STREAM_EVERY_MS) this.#flush()
   }
 
-  finish(): void {
+  // The step is over: the last piece, then its whole visible reply.
+  finish(answer: string): void {
     this.#flush()
+    this.#seq += 1
+    this.#post(JSON.stringify({ sessionId: this.#sessionId, key: this.#key, seq: this.#seq, done: true, answer }))
   }
 
   #flush(): void {
@@ -293,7 +301,7 @@ class LiveStreamer {
     const block = dirty === 'text' ? undefined : this.#blocks.get(dirty)
     const body =
       block === undefined
-        ? { sessionId: this.#sessionId, text: this.#text }
+        ? { sessionId: this.#sessionId, key: this.#key, seq: (this.#seq += 1), text: this.#text }
         : { sessionId: this.#sessionId, toolUseId: block.id, tool: block.name, json: block.json }
 
     this.#post(JSON.stringify(body))
@@ -385,14 +393,14 @@ export const register: Register = on => {
 
     // Only the main conversation streams; subagents show up through hooks.
     const post = (body: string): void => void send($, '/mod/stream', body)
-    const live = e.agentId === undefined ? new LiveStreamer(post, sessionId) : null
+    const live = e.agentId === undefined ? new LiveStreamer(post, sessionId, `${e.turnId}:${e.index}`) : null
     const stream = next(e)
 
     for (;;) {
       const step = await stream.next()
 
       if (step.done === true) {
-        live?.finish()
+        live?.finish(step.value.answer)
         if (step.value.usage !== null) await report($, { sessionId, step: step.value.usage })
 
         return step.value

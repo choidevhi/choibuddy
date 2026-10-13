@@ -20,7 +20,7 @@ export type ChatEvents = {
   // An event in the shape of a Codex hook (session_id, hook_event_name, ...).
   hook: (raw: JsonObject) => void
   // The reply being written, so far.
-  reply: (threadId: string, text: string) => void
+  reply: (threadId: string, itemId: string, text: string) => void
   // What Codex asks the person (an approval, a question), in the shape of a
   // PermissionRequest hook; null when nobody answered.
   approval: (raw: JsonObject, answer: (decision: Decision | null) => void) => void
@@ -675,7 +675,7 @@ export class CodexChats {
           thread.reply = ''
         }
         thread.reply += str(params, 'delta') ?? ''
-        this.#events.reply(thread.id, thread.reply)
+        this.#events.reply(thread.id, itemId ?? '', thread.reply)
         break
       }
       case 'item/started':
