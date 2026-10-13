@@ -16,9 +16,9 @@ import { AutoLanguage, parseLang } from './language.ts'
 import { type TermRun, Terminals } from './terminal.ts'
 import { claimLaunchPrompt, isFolder, type LaunchPrompt, openSession, openTerminal } from './launch.ts'
 import { SessionMeta } from './meta.ts'
-import { LEGACY, LiveChats } from './live-chat.ts'
+import { type EngineMessage, LEGACY, LiveChats } from './live-chat.ts'
 import { liveField, partialField, streamTail } from './partial.ts'
-import { glanceAt, lastCwd, Transcripts } from './transcripts.ts'
+import { glanceAt, lastCwd, Transcripts, userText } from './transcripts.ts'
 import { baseName, type FileReader, languageOf } from './previews.ts'
 import { type HookInput, parseHookInput, parseSlash, RELOAD_COMMAND, type Revival, Store } from './store.ts'
 import { ownDevice, plainIp, readStatus, Tailnet } from './tailnet.ts'
@@ -42,6 +42,9 @@ const CODEX_IMAGES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'i
 const CODEX_READ_MS = 2_000
 // Open conversations' transcripts are read this often for what they gained.
 const CHAT_TICK_MS = 250
+// The most of Claude Code's own messages the mod sends, and of each one's text.
+const ENGINE_TAIL = 40
+const ENGINE_TEXT = 20_000
 const PRUNE_MS = 60_000
 const TAILNET_CHECK_MS = 30_000
 const PREVIEW_FILE_LIMIT = 1_000_000
@@ -867,7 +870,8 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
   }
 
   const handleMod = async (req: IncomingMessage, res: ServerResponse, path: string): Promise<void> => {
-    const body = await readBody(req, API_BODY_LIMIT)
+    // Claude Code's last messages can run long; the rest are small.
+    const body = await readBody(req, path === '/mod/messages' ? HOOK_BODY_LIMIT : API_BODY_LIMIT)
     const parsed = body === null ? null : parseJsonObject(body)
 
     if (parsed === null) {
@@ -878,6 +882,26 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
 
     if (path === '/mod/usage') {
       if (store.applyUsage(parsed)) scheduleSnapshot()
+      sendJson(res, 200, { ok: true })
+
+      return
+    }
+
+    // Claude Code's last messages, sent by the mod after each step: they fill
+    // in what the transcript file lacks (it can lag, or stop being written).
+    if (path === '/mod/messages') {
+      const sessionId = str(parsed, 'sessionId')
+      const tail: EngineMessage[] = []
+
+      for (const item of objects(arr(parsed, 'messages')).slice(-ENGINE_TAIL)) {
+        const role = str(item, 'role')
+        const raw = (str(item, 'text') ?? '').slice(0, ENGINE_TEXT)
+        const text = role === 'user' ? userText(raw) : raw.trim()
+
+        if ((role === 'user' || role === 'assistant') && text !== null && text !== '') tail.push({ role, text })
+      }
+
+      if (sessionId !== null) liveChats.engine(sessionId, tail)
       sendJson(res, 200, { ok: true })
 
       return

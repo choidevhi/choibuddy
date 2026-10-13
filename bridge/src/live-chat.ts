@@ -4,7 +4,7 @@
 // the order they happened, so a screen only ever appends: it never guesses
 // which streamed text became which transcript message, and a reply never
 // leaves the screen before the transcript holds it.
-import type { ChatDraft, ChatMessage, ChatPatch } from '../../shared/protocol.ts'
+import type { ChatDraft, ChatMessage, ChatPatch, ChatRole } from '../../shared/protocol.ts'
 
 // The most a patch carries; a screen further behind reads the page again.
 const MAX_PATCH = 200
@@ -22,6 +22,29 @@ const FULL_EVERY = 25
 const PROBE_CHARS = 19_000
 // What an older mod's pieces are filed under: it names no step.
 export const LEGACY = 'legacy'
+
+// The conversation's last messages as Claude Code holds them, sent by the
+// mod after each step: what the transcript file should have.
+export type EngineMessage = { role: ChatRole; text: string }
+
+// The transcript, plus the messages Claude Code has that the file does not
+// yet (it can lag, or stop being written). They follow the last transcript
+// message found in the engine's list; with none found nothing is added.
+export function withEngineTail(messages: readonly ChatMessage[], tail: readonly EngineMessage[], now: number): readonly ChatMessage[] {
+  if (tail.length === 0) return messages
+
+  const last = messages.at(-1)
+
+  if (last === undefined) return messages
+
+  const lastText = squash(last.text)
+  // A reply the transcript joined from several blocks ends with the engine's last block.
+  const at = tail.findLastIndex(item => item.role === last.role && squash(item.text) !== '' && lastText.endsWith(squash(item.text)))
+
+  if (at === -1 || at === tail.length - 1) return messages
+
+  return [...messages, ...tail.slice(at + 1).map((item, index) => ({ id: `engine-${messages.length + index}`, role: item.role, text: item.text, at: now }))]
+}
 
 export type LiveChatDeps = {
   // The session's messages as the transcript has them now (read again on
@@ -61,6 +84,7 @@ export class LiveChats {
   readonly #drafts = new Map<string, Draft>()
   // The key of the draft each session settled last.
   readonly #settled = new Map<string, string>()
+  readonly #engine = new Map<string, readonly EngineMessage[]>()
 
   constructor(deps: LiveChatDeps) {
     this.#deps = deps
@@ -80,7 +104,7 @@ export class LiveChats {
       // The step before may still be on its way into the transcript.
       this.sync(sessionId)
 
-      const messages = this.#deps.messages(sessionId) ?? []
+      const messages = this.#messages(sessionId) ?? []
       const base = messages.length
       const probe = squash(text).slice(0, PROBE_CHARS)
 
@@ -119,7 +143,14 @@ export class LiveChats {
     this.sync(sessionId)
   }
 
+  // Claude Code's own last messages, from the mod.
+  engine(sessionId: string, tail: readonly EngineMessage[]): void {
+    this.#engine.set(sessionId, tail)
+    this.sync(sessionId)
+  }
+
   forget(sessionId: string): void {
+    this.#engine.delete(sessionId)
     this.#sent.delete(sessionId)
     this.#settled.delete(sessionId)
     if (this.#drafts.delete(sessionId)) this.#clear(sessionId)
@@ -138,7 +169,7 @@ export class LiveChats {
   // the transcript holds it now. Until then the reply's part already in the
   // transcript stays out of the patches: it shows once, as the draft.
   sync(sessionId: string): void {
-    const messages = this.#deps.messages(sessionId)
+    const messages = this.#messages(sessionId)
 
     if (messages === null) return
 
@@ -152,6 +183,12 @@ export class LiveChats {
     this.#settled.set(sessionId, this.#drafts.get(sessionId)?.key ?? '')
     this.#drafts.delete(sessionId)
     this.#clear(sessionId)
+  }
+
+  #messages(sessionId: string): readonly ChatMessage[] | null {
+    const messages = this.#deps.messages(sessionId)
+
+    return messages === null ? null : withEngineTail(messages, this.#engine.get(sessionId) ?? [], this.#deps.now())
   }
 
   // What a screen that just connected needs: every draft, whole.

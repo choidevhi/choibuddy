@@ -20,6 +20,17 @@ class NativeBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun platform(): String = "android"
 
+    /** 휴대폰에 음성 인식이 있으면 true(없으면 입력창에 마이크가 안 나온다). */
+    @JavascriptInterface
+    fun voiceAvailable(): Boolean = activity.voiceAvailable()
+
+    /** 말로 입력을 시작한다. [language]는 ko-KR 같은 태그. 결과는 `choibuddy-voice` 이벤트로 온다. */
+    @JavascriptInterface
+    fun startVoice(language: String) = activity.runOnUiThread { activity.startVoice(language) }
+
+    @JavascriptInterface
+    fun stopVoice() = activity.runOnUiThread { activity.stopVoice() }
+
     /** 짝지은 PC 전부: `[{"baseUrl":…,"token":…}]`, 없으면 `[]`. */
     @JavascriptInterface
     fun getConfigs(): String = Wire.pairingsJson(prefs.pairings)

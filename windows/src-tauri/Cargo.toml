@@ -1,6 +1,6 @@
 [package]
 name = "choibuddy"
-version = "0.9.1"
+version = "0.9.2"
 description = "Claude Code 작업을 실시간으로 보여 주고 원격 승인을 받는 위젯"
 authors = ["choidevhi"]
 edition = "2024"

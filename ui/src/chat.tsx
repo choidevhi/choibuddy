@@ -1,12 +1,13 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type LiveStream, PICKED_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
+import { type ChatMessage, type CommandInfo, type Conversation, type GalleryImage, type Limits, type LiveStream, PICKED_MODES, type PromptMode, type QueuedItem, type Session } from '../../shared/protocol.ts'
 import { useBackLayer } from './back.ts'
 import { BrowserPane } from './browser.tsx'
 import { Buddy, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type MessageKey, useI18n } from './i18n.ts'
-import { type Feed, feedFor, type PcSession } from './feeds.ts'
-import { ArrowUpIcon, ChevronDownIcon, ClipboardIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, StopIcon, TrashIcon, XIcon } from './icons.tsx'
+import { Activity } from './activity.tsx'
+import { type Feed, feedFor, limitsFor, type PcSession } from './feeds.ts'
+import { ArrowUpIcon, ChevronDownIcon, ClipboardIcon, MicIcon, DownloadIcon, GlobeIcon, PaperclipIcon, SpinnerIcon, SplitDownIcon, SplitIcon, StopIcon, TrashIcon, XIcon } from './icons.tsx'
 import { readDraft, saveDraft } from './drafts.ts'
 import { clipboardImageFile, RemoteImage, saveImage } from './images.tsx'
 import { patchConversation } from './chat-patch.ts'
@@ -21,6 +22,8 @@ import { Picker } from './picker.tsx'
 import { hasBrowser as browserAvailable, platform, readPref } from './platform.ts'
 import { askStop } from './stop.ts'
 import { useTypewriter } from './typewriter.ts'
+import { CodexModel, CodexModelControl, ModelControl } from './model.tsx'
+import { useVoice, voiceAvailable } from './voice.ts'
 import { ZoomView } from './zoom.tsx'
 
 const PAGE = 150
@@ -152,7 +155,7 @@ export function suggestCommands(commands: CommandInfo[], typed: string): Command
 // box (on the phone also the clipboard button). Typing "/" offers the
 // session's slash commands.
 export function Composer({ session, onSend, onUpload, loadCommands, inject = null, compact = false, onSent }: ComposerProps) {
-  const { t } = useI18n()
+  const { lang, t } = useI18n()
   const [draft, setDraft] = useState('')
   const [files, setFiles] = useState<Attachment[]>([])
   const [sending, setSending] = useState(false)
@@ -248,6 +251,30 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
     attach(inject.files)
     input.current?.focus()
   }, [inject?.id])
+
+  // Spoken words go after what the box held when listening started.
+  const spokenAfter = useRef('')
+  const canSpeak = useMemo(voiceAvailable, [])
+  const voice = useVoice(
+    lang,
+    text => {
+      const before = spokenAfter.current.trimEnd()
+
+      changeDraft(text === '' ? spokenAfter.current : before === '' ? text : `${before} ${text}`)
+    },
+    denied => showToast(t(denied ? 'voice.denied' : 'voice.failed')),
+  )
+
+  const speak = (): void => {
+    if (voice.listening) {
+      voice.stop()
+
+      return
+    }
+
+    spokenAfter.current = held.current.text
+    voice.start()
+  }
 
   const pasteClipboard = (): void => {
     const file = clipboardImageFile()
@@ -439,6 +466,9 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
               <ClipboardIcon size={18} />
             </button>
           )}
+          {/* The model and effort, as in Claude's own apps; Codex's from its record. */}
+          {session !== null &&
+            (session.agent !== 'codex' ? <ModelControl session={session} onSend={onSend} /> : session.managed ? <CodexModelControl session={session} /> : <CodexModel session={session} />)}
           {busy && (
             <Picker
               className="composer-mode-select"
@@ -449,6 +479,18 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
             />
           )}
           <span className="composer-gap" />
+          {canSpeak && ready && (
+            <button
+              type="button"
+              className={`composer-round composer-mic ${voice.listening ? 'composer-mic--on' : ''}`}
+              onClick={speak}
+              title={t(voice.listening ? 'voice.stop' : 'voice.start')}
+              aria-label={t(voice.listening ? 'voice.stop' : 'voice.start')}
+              aria-pressed={voice.listening}
+            >
+              <MicIcon size={17} />
+            </button>
+          )}
           {busy && (
             <button type="button" className="composer-round composer-stop" onClick={() => askStop(session.id)} title={t('chat.stopHint')} aria-label={t('chat.stop')}>
               <StopIcon size={15} />
@@ -473,6 +515,8 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
 
 type PaneProps = {
   sessionId: string | null
+  // The account windows the session counts against (Claude's or Codex's).
+  limits: Limits | null
   entry: PcEntry | null
   live: PcSession | null
   feed: Feed | null
@@ -494,7 +538,7 @@ type PaneProps = {
 // One conversation: the transcript (paged), what Claude is typing, the
 // queue, slash command output, and a prompt box for that session.
 function ConversationPane(props: PaneProps) {
-  const { sessionId, entry, live, feed, stream, multiPc, tone, now, focused, tiles, onFocus, onDeleted, onSend, onUpload, loadCommands } = props
+  const { sessionId, limits, entry, live, feed, stream, multiPc, tone, now, focused, tiles, onFocus, onDeleted, onSend, onUpload, loadCommands } = props
   const { t } = useI18n()
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [missing, setMissing] = useState(false)
@@ -509,6 +553,9 @@ function ConversationPane(props: PaneProps) {
   // Prompts on their way in, one bubble each until the transcript has them.
   const [outbox, setOutbox] = useState<OutPrompt[]>([])
   const scroller = useRef<HTMLDivElement>(null)
+  const pane = useRef<HTMLElement>(null)
+  // Room for the activity column beside the conversation.
+  const [side, setSide] = useState(false)
   const pinnedToBottom = useRef(true)
   const content = useRef<HTMLDivElement>(null)
   const lastTop = useRef(0)
@@ -540,6 +587,18 @@ function ConversationPane(props: PaneProps) {
   }, [sessionId, feed?.connection.token, galleryAt])
 
   useBackLayer(viewing !== null, () => setViewing(null))
+
+  useEffect(() => {
+    const element = pane.current
+
+    if (element === null) return
+
+    const observer = new ResizeObserver(() => setSide(element.clientWidth >= SIDE_MIN_PX))
+
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (viewing === null) return
@@ -782,7 +841,7 @@ function ConversationPane(props: PaneProps) {
   }
 
   return (
-    <section className={`convo-main ${tiles !== null ? 'pane' : ''} ${focused && tiles !== null ? 'pane--focused' : ''}`} onPointerDown={onFocus}>
+    <section ref={pane} className={`convo-main ${tiles !== null ? 'pane' : ''} ${focused && tiles !== null ? 'pane--focused' : ''}`} onPointerDown={onFocus}>
       {tiles !== null && (
         <header className="pane-head">
           <span className={`status-dot dot--${entry?.live === true ? status : 'ended'}`} />
@@ -818,6 +877,9 @@ function ConversationPane(props: PaneProps) {
         </header>
       )}
 
+      <div className="convo-body">
+      <div className="convo-col">
+      {live !== null && !side && <Activity session={live} stream={stream} limits={limits} link={feed?.link ?? 'offline'} tone={tone} now={now} side={false} />}
       <div className="convo-scroll-wrap">
       <div
         className="convo-scroll"
@@ -984,6 +1046,9 @@ function ConversationPane(props: PaneProps) {
         )}
         <Composer session={live} onSend={onSend} onUpload={onUpload} loadCommands={loadCommands} compact={tiles !== null} onSent={onSent} />
       </div>
+      </div>
+      {live !== null && side && <Activity session={live} stream={stream} limits={limits} link={feed?.link ?? 'offline'} tone={tone} now={now} side />}
+      </div>
 
       {viewing !== null && (
         <div className="viewer" role="dialog" aria-modal="true" aria-label={viewing.name}>
@@ -1025,12 +1090,16 @@ function ConversationPane(props: PaneProps) {
 
 // Panes need room: below this width only the pane in focus is drawn.
 const SPLIT_MIN_PX = 900
+// A pane this wide gets the activity column beside its conversation.
+const SIDE_MIN_PX = 900
 
 type ChatProps = {
   streams: ReadonlyMap<string, LiveStream>
   feeds: Feed[]
   multiPc: boolean
   sessions: PcSession[]
+  limits: ReadonlyMap<string, Limits | null>
+  codexLimits: ReadonlyMap<string, Limits | null>
   selectedId: string | null
   onSelect: (sessionId: string, live: boolean) => void
   tone: Tone
@@ -1045,7 +1114,7 @@ type ChatProps = {
 // PC's sessions next to them, and the conversations in panes that split
 // left/right or top/bottom like tmux (on a wide screen), each with its own
 // prompt box.
-export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, tone, now, onSend, onUpload, loadCommands, onNewSession }: ChatProps) {
+export function Chat({ streams, feeds, multiPc, sessions, limits, codexLimits, selectedId, onSelect, tone, now, onSend, onUpload, loadCommands, onNewSession }: ChatProps) {
   const { t } = useI18n()
   const [tile, setTile] = useTiles('chatTiles')
   const [focusId, setFocusId] = useState('')
@@ -1158,6 +1227,7 @@ export function Chat({ streams, feeds, multiPc, sessions, selectedId, onSelect, 
                 <ConversationPane
                   key={leaf.id}
                   sessionId={leaf.sessionId}
+                  limits={limitsFor({ limits, codexLimits }, live)}
                   entry={entry}
                   live={live}
                   feed={feed}

@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 입력창의 마이크: 말로 프롬프트를 쓴다. 처음 누를 때 묻는다. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 사진 저장(Pictures/ChoiBuddy)은 Android 10 이상에서 MediaStore로 권한 없이 쓴다. 9 이하만 저장할 때 묻는다. -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -16,6 +18,10 @@
     <!-- Tailscale 앱이 깔려 있는지 보고 열기 위해(Android 11 이상의 패키지 공개 범위). -->
     <queries>
         <package android:name="com.tailscale.ipn" />
+        <!-- 휴대폰의 음성 인식 서비스를 찾기 위해. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 
     <!-- allowBackup=false라 Android 11 이하는 백업이 아예 없다. 12 이상은 dataExtractionRules가 토큰을 뺀다. -->

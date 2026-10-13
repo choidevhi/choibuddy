@@ -30,6 +30,39 @@ interface ChoiBuddyNativeApi {
   openTailscale?(): void
   // Added in 0.6.1: opens an https link in the phone's browser (an update's APK).
   openUrl?(url: string): boolean
+  // Added in 0.9.2: speaking a prompt. Results come as "choibuddy-voice"
+  // events: {kind: listening | partial | final | error | denied, text}.
+  voiceAvailable?(): boolean
+  startVoice?(language: string): void
+  stopVoice?(): void
+}
+
+// The part of the browser's speech recognition the prompt box uses
+// (Chromium names it webkitSpeechRecognition).
+interface SpeechAlternative {
+  transcript: string
+}
+
+interface SpeechResult {
+  readonly isFinal: boolean
+  readonly length: number
+  [index: number]: SpeechAlternative
+}
+
+interface SpeechResultEvent {
+  readonly resultIndex: number
+  readonly results: { readonly length: number; [index: number]: SpeechResult }
+}
+
+interface BrowserSpeech {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: SpeechResultEvent) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+  start(): void
+  stop(): void
 }
 
 // The app's version, from package.json at build time.
@@ -37,6 +70,7 @@ declare const __APP_VERSION__: string
 
 interface Window {
   ChoiBuddyNative?: ChoiBuddyNativeApi
+  webkitSpeechRecognition?: new () => BrowserSpeech
   // Called by the Android shell on the back button. True when the app went
   // back itself (closed something, or went to the previous tab); false lets
   // the system leave the app.

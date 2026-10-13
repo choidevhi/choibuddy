@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ChatDraft, ChatMessage, ChatPatch } from '../../shared/protocol.ts'
-import { LEGACY, LiveChats } from '../src/live-chat.ts'
+import { LEGACY, LiveChats, withEngineTail } from '../src/live-chat.ts'
 
 // A transcript the test grows by hand, and every event the bridge would send.
 function setup() {
@@ -152,4 +152,26 @@ test('a reply written in blocks shows once: as the draft until all of it is in',
   chats.tick(['s'])
   assert.deepEqual(patches().at(-1)?.messages.map(message => message.text), ['First block.\n\nSecond block.'])
   assert.equal(drafts().at(-1)?.text, null)
+})
+
+test('messages Claude Code has but the transcript lacks are filled in after its last one', () => {
+  const file = [
+    { id: 'u1', role: 'user' as const, text: 'fix it', at: 0 },
+    { id: 'a1', role: 'assistant' as const, text: 'Looking.\n\nFound it.', at: 0 },
+  ]
+  const engine = [
+    { role: 'user' as const, text: 'fix it' },
+    { role: 'assistant' as const, text: 'Looking.' },
+    { role: 'assistant' as const, text: 'Found it.' },
+    { role: 'user' as const, text: 'now test it' },
+    { role: 'assistant' as const, text: 'All 12 pass.' },
+  ]
+
+  assert.deepEqual(withEngineTail(file, engine, 5).slice(2).map(message => [message.id, message.role, message.text]), [
+    ['engine-2', 'user', 'now test it'],
+    ['engine-3', 'assistant', 'All 12 pass.'],
+  ])
+  // Caught up, or nothing in common: the transcript alone.
+  assert.equal(withEngineTail(file, engine.slice(0, 3), 5), file)
+  assert.equal(withEngineTail(file, [{ role: 'user', text: 'other' }], 5), file)
 })

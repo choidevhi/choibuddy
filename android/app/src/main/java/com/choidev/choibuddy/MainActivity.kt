@@ -76,6 +76,23 @@ class MainActivity : ComponentActivity() {
         if (granted) thread(name = "choibuddy-save-image") { save() } else toast(R.string.image_save_failed)
     }
 
+    // 입력창의 마이크. 듣는 동안의 결과는 `choibuddy-voice` 이벤트로 UI에 간다.
+    private val voice by lazy { Voice(this) { detail -> runScript("window.dispatchEvent(new CustomEvent('choibuddy-voice',{detail:$detail}))") } }
+    private var voiceLanguage = "ko-KR"
+    private val askMicrophone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) voice.start(voiceLanguage) else runScript("window.dispatchEvent(new CustomEvent('choibuddy-voice',{detail:{kind:'denied',text:''}}))")
+    }
+
+    /** 듣기 시작한다. 마이크 권한이 없으면 먼저 묻는다. 메인 스레드에서 부른다. */
+    fun startVoice(language: String) {
+        voiceLanguage = language
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) voice.start(language) else askMicrophone.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    fun stopVoice() = voice.stop()
+
+    fun voiceAvailable(): Boolean = voice.available()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
@@ -120,6 +137,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        voice.destroy()
         webView.destroy()
         super.onDestroy()
     }

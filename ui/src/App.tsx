@@ -12,10 +12,8 @@ import { Chat } from './chat.tsx'
 import { Connect, type Prefs } from './connect.tsx'
 import { Docs } from './docs.tsx'
 import { Gallery } from './gallery.tsx'
-import { HomeScreen } from './homescreen.tsx'
 import { detectLang, I18nContext, type Lang, LANGS, translator } from './i18n.ts'
 import {
-  ChatIcon,
   DownloadIcon,
   FileTextIcon,
   GlobeIcon,
@@ -41,7 +39,7 @@ import { playChime } from './sound.ts'
 import { useStopRequests } from './stop.ts'
 import { useChatRequests } from './go.ts'
 
-type Tab = 'home' | 'chat' | 'gallery' | 'browser' | 'terminal' | 'docs' | 'connect'
+type Tab = 'home' | 'gallery' | 'browser' | 'terminal' | 'docs' | 'connect'
 
 type Theme = 'dark' | 'light'
 
@@ -395,7 +393,7 @@ export function App() {
   // A session that just opened in ChoiBuddy (Codex): its chat comes up.
   useChatRequests(sessionId => {
     setChatId(sessionId)
-    openTab('chat')
+    openTab('home')
   })
 
   // A terminal asked for elsewhere (session list, menu, new session) opens in the terminal tab.
@@ -415,7 +413,7 @@ export function App() {
 
   // Ctrl+PageUp / Ctrl+PageDown step through the tabs, as in a browser.
   useEffect(() => {
-    const tabs: Tab[] = platform === 'windows' ? ['home', 'chat', 'gallery', 'browser', 'terminal', 'docs', 'connect'] : ['home', 'chat', 'gallery', 'terminal', 'docs', 'connect']
+    const tabs: Tab[] = platform === 'windows' ? ['home', 'gallery', 'browser', 'terminal', 'docs', 'connect'] : ['home', 'gallery', 'terminal', 'docs', 'connect']
 
     const onKey = (event: KeyboardEvent): void => {
       if (!event.ctrlKey || (event.key !== 'PageUp' && event.key !== 'PageDown')) return
@@ -458,9 +456,6 @@ export function App() {
             <nav className="tabs">
               <button type="button" className={activeTab === 'home' ? 'on' : ''} onClick={() => openTab('home')} title={t('tab.home')}>
                 <HomeIcon size={17} />
-              </button>
-              <button type="button" className={activeTab === 'chat' ? 'on' : ''} onClick={() => openTab('chat')} title={t('tab.chat')}>
-                <ChatIcon size={17} />
               </button>
               <button type="button" className={activeTab === 'gallery' ? 'on' : ''} onClick={() => openTab('gallery')} title={t('tab.gallery')}>
                 <ImageIcon size={17} />
@@ -541,33 +536,13 @@ export function App() {
                 )}
               </div>
             ) : activeTab === 'home' ? (
-              <HomeScreen
-                feeds={feeds}
-                streams={merged.streams}
-                sessions={ordered}
-                limits={merged.limits}
-                codexLimits={merged.codexLimits}
-                auto={current}
-                link={sources.length === 0 ? 'connecting' : link}
-                tone={tone}
-                now={now}
-                compact={compact}
-                short={short}
-                onSend={onSend}
-                onUpload={onUpload}
-                loadCommands={loadCommands}
-                onNewSession={() => setNewSession(true)}
-                onOpenChat={sessionId => {
-                  setChatId(sessionId)
-                  openTab('chat')
-                }}
-              />
-            ) : activeTab === 'chat' ? (
               <Chat
                 streams={merged.streams}
                 feeds={feeds}
                 multiPc={merged.multiPc}
                 sessions={ordered}
+                limits={merged.limits}
+                codexLimits={merged.codexLimits}
                 selectedId={chatId ?? current?.id ?? null}
                 onSelect={(id, live) => {
                   setChatId(id)

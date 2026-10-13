@@ -11,7 +11,7 @@ const BRIDGE = 'http://127.0.0.1:47130'
 const POLL_MS = 500
 // Sent with every poll, so the bridge can tell a session that still runs an
 // older copy of this mod. Kept equal to .claude-plugin/plugin.json.
-const MOD_VERSION = '0.5.5'
+const MOD_VERSION = '0.5.6'
 const BROWSER_TOOL = 'browser_view'
 
 type UsageReport = {
@@ -244,6 +244,18 @@ async function reportCommands($: EngineInterface, sessionId: string): Promise<vo
   await send($, '/mod/commands', JSON.stringify({ sessionId, commands }))
 }
 
+// The conversation's last messages as Claude Code holds them, for the bridge
+// to fill in what the transcript file lacks (it can lag, or stop being
+// written). Tool results and messages with no words are left out.
+const SENT_MESSAGES = 20
+
+async function reportMessages($: EngineInterface, sessionId: string): Promise<void> {
+  const rows = await $.session.messages()
+  const messages = rows.slice(-SENT_MESSAGES * 4).flatMap(row => (row.text.trim() === '' || (row.toolResults?.length ?? 0) > 0 ? [] : [{ role: row.role, text: row.text }]))
+
+  await send($, '/mod/messages', JSON.stringify({ sessionId, messages: messages.slice(-SENT_MESSAGES) }))
+}
+
 // Tools whose input is code worth watching as it is written.
 const LIVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 const STREAM_EVERY_MS = 80
@@ -417,6 +429,7 @@ export const register: Register = on => {
 
       if (step.done === true) {
         live?.finish(step.value.answer)
+        if (live !== null) void reportMessages($, sessionId).catch(() => undefined)
         if (step.value.usage !== null) await report($, { sessionId, step: step.value.usage })
 
         return step.value
