@@ -895,9 +895,21 @@ export class Store {
   }
 
   // What the mod polling for a session says it is (null: older than 0.5.2).
-  noteMod(sessionId: string, version: string | null): void {
+  // `loadedAt`: when the polling mod was loaded. A /reload-plugins handed
+  // over before then is done: the mod that ran it was replaced and never
+  // reports back. True when one was closed.
+  noteMod(sessionId: string, version: string | null, loadedAt: number | null = null): boolean {
     if (version === null) this.#modVersions.delete(sessionId)
     else this.#modVersions.set(sessionId, version)
+
+    if (loadedAt === null) return false
+
+    const reloads = (this.#commandsOut.get(sessionId) ?? []).flatMap(item => (item.command === RELOAD_COMMAND && item.takenAt !== null && item.takenAt < loadedAt ? [item.id] : []))
+    let closed = false
+
+    for (const id of reloads) closed = this.commandResult({ sessionId, id, command: RELOAD_COMMAND, args: '', text: '' }) || closed
+
+    return closed
   }
 
   // The person asked to stop the session's running turn (Esc in the

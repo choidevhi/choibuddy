@@ -947,7 +947,7 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       const sessionId = str(parsed, 'sessionId')
 
       checkInstalledMod()
-      if (sessionId !== null) store.noteMod(sessionId, str(parsed, 'mod'))
+      if (sessionId !== null && store.noteMod(sessionId, str(parsed, 'mod'), num(parsed, 'loadedAt'))) scheduleSnapshot()
 
       // Claude Code is open for this session even when the bridge lost it.
       if (sessionId !== null && store.revive(sessionId, () => revival(sessionId))) {

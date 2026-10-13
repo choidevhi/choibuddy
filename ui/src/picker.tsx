@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useBackLayer } from './back.ts'
-import { CheckIcon } from './icons.tsx'
+import { CheckIcon, ChevronDownIcon } from './icons.tsx'
 
 export type PickerOption<T extends string> = {
   value: T
@@ -182,7 +182,7 @@ export function Picker<T extends string>({ value, options, onChange, placeholder
         {selected?.dot !== undefined && <span className={`status-dot ${selected.dot}`} />}
         <span className="picker-trigger-label">{selected?.label ?? placeholder}</span>
         {selected?.hint !== undefined && selected.hint !== '' && <span className="picker-trigger-hint">{selected.hint}</span>}
-        <span className="picker-caret">▾</span>
+        <ChevronDownIcon size={13} className="picker-caret" />
       </button>
       {open && sheet && (
         <div

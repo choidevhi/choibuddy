@@ -12,7 +12,7 @@ export const CONFIG_PATH = join(HOME_DIR, 'config.json')
 
 export const LOG_PATH = join(HOME_DIR, 'bridge.log')
 
-export const VERSION = '0.9.2'
+export const VERSION = '0.9.3'
 
 // A phone or another PC paired with this bridge. Only a hash of its code is
 // kept, and each one can be cut off on its own.

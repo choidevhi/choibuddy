@@ -420,3 +420,23 @@ test('a Codex session without its terminal named takes the oldest waiting place 
   assert.equal(store.follows('cx-1'), true)
   assert.equal(store.resolve(hook('Stop', {}, 'cx-1')).sessionId, first)
 })
+
+test('a reload handed over before the polling mod was loaded is done', () => {
+  const { store, tick } = makeStore()
+
+  store.apply(hook('SessionStart', { source: 'startup' }))
+  store.takePrompts('sess-1')
+  store.queueCommand('sess-1', 'reload-plugins', '')
+  assert.equal(store.takeCommands('sess-1').length, 1)
+  tick(1_000)
+
+  // The old mod polls again: not reloaded yet.
+  assert.equal(store.noteMod('sess-1', '0.5.7', 500), false)
+  // The reloaded one, loaded after the reload was handed over.
+  assert.equal(store.noteMod('sess-1', '0.5.7', 1_500), true)
+
+  const session = store.snapshot(SERVER).sessions[0]
+
+  assert.deepEqual(session?.queued, [])
+  assert.equal(session?.commandLog.at(-1)?.failed, false)
+})

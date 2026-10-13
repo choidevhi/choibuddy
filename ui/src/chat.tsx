@@ -491,21 +491,24 @@ export function Composer({ session, onSend, onUpload, loadCommands, inject = nul
               <MicIcon size={17} />
             </button>
           )}
-          {busy && (
+          {/* While a turn runs, an empty box offers stop where send is; words
+              in the box bring send back. */}
+          {busy && text === '' && !sending ? (
             <button type="button" className="composer-round composer-stop" onClick={() => askStop(session.id)} title={t('chat.stopHint')} aria-label={t('chat.stop')}>
               <StopIcon size={15} />
             </button>
+          ) : (
+            <button
+              type="button"
+              className="composer-round composer-send"
+              disabled={!ready || sending || uploading || text === ''}
+              title={busy ? t('chat.sendNowHint') : t('action.send')}
+              aria-label={t('action.send')}
+              onClick={() => void send()}
+            >
+              {sending ? <SpinnerIcon size={16} /> : <ArrowUpIcon size={18} />}
+            </button>
           )}
-          <button
-            type="button"
-            className="composer-round composer-send"
-            disabled={!ready || sending || uploading || text === ''}
-            title={busy ? t('chat.sendNowHint') : t('action.send')}
-            aria-label={t('action.send')}
-            onClick={() => void send()}
-          >
-            {sending ? <SpinnerIcon size={16} /> : <ArrowUpIcon size={18} />}
-          </button>
         </div>
       </div>
     </div>

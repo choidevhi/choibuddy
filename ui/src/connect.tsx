@@ -5,7 +5,7 @@ import { useBackLayer } from './back.ts'
 import { showToast } from './confirm.tsx'
 import { type Feed, readRemotes, saveRemotes } from './feeds.ts'
 import { ago, duration, isLang, type Lang, LANGS, type MessageKey, type Translate, useI18n } from './i18n.ts'
-import { CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
+import { CheckIcon, CopyIcon, ScanIcon, ShieldIcon } from './icons.tsx'
 import { type CodexState, createDevice, fetchCodex, fetchSetup, fetchTerms, listDevices, revokeDevice, rotateCodes, setAutoAccept, setAutoLanguage, setCodex, setRemoteTerminal, setTrustTailnet, type SetupStatus } from './live.ts'
 import { isMac, parsePairingLink, platform, windowsShell } from './platform.ts'
 import { Picker } from './picker.tsx'
@@ -255,11 +255,11 @@ function Guide({ localFeed }: { localFeed: Feed | null }) {
         <>
           <div className="row">
             <span>{t('guide.hooks')}</span>
-            <span className={`row-value ${setup.hooks ? 'good' : 'bad'}`}>{setup.hooks ? `✓ ${t('guide.ok')}` : t('guide.missing')}</span>
+            <span className={`row-value ${setup.hooks ? 'good' : 'bad'}`}>{setup.hooks ? <><CheckIcon size={13} /> {t('guide.ok')}</> : t('guide.missing')}</span>
           </div>
           <div className="row">
             <span>{t('guide.mod')}</span>
-            <span className={`row-value ${setup.mod ? 'good' : 'bad'}`}>{setup.mod ? `✓ ${t('guide.ok')}` : t('guide.missing')}</span>
+            <span className={`row-value ${setup.mod ? 'good' : 'bad'}`}>{setup.mod ? <><CheckIcon size={13} /> {t('guide.ok')}</> : t('guide.missing')}</span>
           </div>
           {platform === 'windows' && (
             <button

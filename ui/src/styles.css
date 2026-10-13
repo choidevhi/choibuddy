@@ -1769,9 +1769,8 @@ button.step:hover {
 }
 
 .composer-stop {
-  margin-right: 4px;
-  background: var(--chip);
-  color: var(--text);
+  background: var(--text);
+  color: var(--card);
 }
 
 .composer-row .composer-mode-select {
@@ -4614,4 +4613,219 @@ body.resizing--column {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The model sheet: from the bottom on a phone, a card in the middle on a
+   wide screen. Rows in rounded groups, the chosen one checked. */
+.model-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.42);
+  animation: fade 0.15s ease-out;
+}
+
+.model-sheet {
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 14px calc(16px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  border-radius: 24px 24px 0 0;
+  background: var(--bg);
+  animation: rise 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.05);
+  color: var(--text);
+}
+
+@media (min-width: 700px) {
+  .model-sheet-backdrop {
+    align-items: center;
+  }
+
+  .model-sheet {
+    width: 420px;
+    border-radius: 22px;
+    padding-bottom: 16px;
+  }
+
+  .model-sheet-grip {
+    display: none;
+  }
+}
+
+.model-sheet-grip {
+  align-self: center;
+  width: 40px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--dim);
+  opacity: 0.5;
+}
+
+.model-sheet-head {
+  display: grid;
+  grid-template-columns: 36px 1fr 36px;
+  align-items: center;
+  padding: 2px 0 4px;
+}
+
+.model-sheet-head .icon-btn {
+  width: 36px;
+  height: 36px;
+  color: var(--text);
+}
+
+.model-sheet-title {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.model-sheet-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.model-sheet-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1px solid var(--card-line);
+}
+
+.model-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 16px;
+  text-align: left;
+  color: var(--text);
+}
+
+.model-sheet-row + .model-sheet-row {
+  border-top: 1px solid var(--panel-line);
+}
+
+.model-sheet-row:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+
+.model-sheet-row:disabled {
+  opacity: 0.5;
+}
+
+.model-sheet-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.model-sheet-name {
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.model-sheet-row > .model-sheet-name {
+  flex: 1;
+}
+
+.model-sheet-desc {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.model-sheet-check {
+  flex: none;
+  color: var(--accent);
+}
+
+.model-sheet-value {
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.model-sheet-more {
+  flex: none;
+  color: var(--dim);
+}
+
+.model-sheet-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.picker-caret {
+  flex: none;
+  opacity: 0.7;
+}
+
+/* One baseline across the activity line. */
+.activity-line .status {
+  align-self: center;
+  align-items: center;
+  line-height: 1;
+  font-size: 12.5px;
+}
+
+.activity-line .status-time {
+  margin-left: 0;
+}
+
+/* The "older mod" note stays one tidy row on a phone. */
+@media (max-width: 600px) {
+  .mod-notice {
+    gap: 8px;
+    padding: 6px 6px 6px 10px;
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
+  .mod-notice-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .mod-notice .btn.small {
+    flex: none;
+    padding: 5px 9px;
+    font-size: 11.5px;
+  }
+}
+
+/* The prompt box row on a phone: the send mode keeps its words, the model
+   chip gives way first and drops the effort (it is in the sheet). */
+.composer-row .composer-mode-select {
+  flex: none;
+  white-space: nowrap;
+}
+
+.composer-row .model-chip-effort {
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .composer-row .model-chip-effort {
+    display: none;
+  }
+
+  .composer-row .model-chip {
+    padding: 5px 8px;
+  }
 }

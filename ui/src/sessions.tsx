@@ -6,7 +6,7 @@ import { Buddy, type Mood, type Pose, tintFor, type Tone } from './buddy.tsx'
 import { ConfirmSheet, showToast } from './confirm.tsx'
 import { type Feed, feedFor, type PcSession } from './feeds.ts'
 import { ago, useI18n } from './i18n.ts'
-import { PlusIcon, TerminalIcon } from './icons.tsx'
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, TerminalIcon } from './icons.tsx'
 import { archiveSessions, deleteConversation, endSession, fetchHistory, reloadPlugins, renameSession } from './live.ts'
 import { openTerminalTab } from './terminal.tsx'
 import { ContextMenu, type MenuEntry } from './menu.tsx'
@@ -420,7 +420,7 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
       {groups.ended.length > 0 && (
         <div className="convo-divider">
           <button type="button" className="convo-divider-label convo-fold" onClick={() => setFoldEnded(foldEnded === 'on' ? 'off' : 'on')} aria-expanded={foldEnded !== 'on'}>
-            <span className="convo-fold-caret">{foldEnded === 'on' ? '▸' : '▾'}</span>
+            {foldEnded === 'on' ? <ChevronRightIcon size={13} className="convo-fold-caret" /> : <ChevronDownIcon size={13} className="convo-fold-caret" />}
             {t('chat.groupEnded')} · {groups.ended.length}
           </button>
           <button type="button" className="link-btn" onClick={() => void archive(groups.ended, true)}>
@@ -437,7 +437,7 @@ export function useSessionNav({ feeds, sessions, tone, now, focusedId, shownIds,
           <span className="convo-divider-label">
             {t('chat.groupArchived')} · {groups.archived.length}
           </span>
-          <span className="picker-caret">{showArchive ? '▾' : '▸'}</span>
+          {showArchive ? <ChevronDownIcon size={13} className="picker-caret" /> : <ChevronRightIcon size={13} className="picker-caret" />}
         </button>
       )}
       {showArchive && groups.archived.map(row)}
