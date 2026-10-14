@@ -768,6 +768,9 @@ function ConversationPane(props: PaneProps) {
   const reloading = live?.queued.some(item => item.mode === 'command' && item.text === '/reload-plugins') === true
   // A reload the session never answered: its mod is too old to take commands.
   const reloadUnanswered = live?.commandLog.some(item => item.command === 'reload-plugins' && item.failed && item.text === '') === true
+  // Claude Code refuses /reload-plugins in a session it runs for a remote
+  // client (the Claude desktop app, an SDK host): asking again changes nothing.
+  const reloadRefused = live?.commandLog.some(item => item.command === 'reload-plugins' && /over a remote connection/i.test(item.text)) === true
   const status = live?.status ?? 'ended'
 
   // A prompt's words, then the files sent with it: pictures (open in the
@@ -1008,8 +1011,8 @@ function ConversationPane(props: PaneProps) {
       <div className="convo-foot">
         {live?.modOutdated === true && feed !== null && closedFor !== live.id && !closedNotices.has(live.id) && (
           <div className="mod-notice">
-            <span className="mod-notice-text">{reloading ? t('mod.reloading') : reloadUnanswered ? t('mod.reloadByHand') : t('mod.outdated')}</span>
-            {!reloading && !reloadUnanswered && (
+            <span className="mod-notice-text">{reloadRefused ? t('mod.reloadRemote') : reloading ? t('mod.reloading') : reloadUnanswered ? t('mod.reloadByHand') : t('mod.outdated')}</span>
+            {!reloading && !reloadUnanswered && !reloadRefused && (
               <button
                 type="button"
                 className="btn small"
