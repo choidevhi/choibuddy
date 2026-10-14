@@ -92,6 +92,36 @@ function freshPath(): string | null {
   return path === '' ? null : path
 }
 
+// The locale a terminal on macOS or Linux starts with. An app opened from
+// Finder hands the bridge no LANG or LC_*, so the shell came up in the C
+// locale and dropped every multibyte key (Hangul typed in the terminal
+// vanished; ASCII went through). Without a UTF-8 one, the system's language
+// is used, as Terminal.app does.
+export function utf8Locale(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, systemLocale: () => string | null): Record<string, string> {
+  if (platform === 'win32') return {}
+
+  const current = env.LC_ALL || env.LC_CTYPE || env.LANG || ''
+
+  if (/utf-?8/i.test(current)) return {}
+
+  // AppleLocale can carry a script and options (ko_Kore_KR, en_US@rg=gbzzzz):
+  // the language and the region make the locale's name.
+  const parts = (systemLocale() ?? '').trim().replace(/@.*$/, '').split('_')
+  const language = parts[0] ?? ''
+  const region = parts.length > 1 ? (parts[parts.length - 1] ?? '') : ''
+
+  return { LANG: /^[a-z]{2,3}$/.test(language) && /^[A-Z]{2}$/.test(region) ? `${language}_${region}.UTF-8` : 'en_US.UTF-8' }
+}
+
+// macOS's language and region (AppleLocale), e.g. ko_KR.
+function appleLocale(): string | null {
+  if (process.platform !== 'darwin') return null
+
+  const read = spawnSync('/usr/bin/defaults', ['read', '-g', 'AppleLocale'], { encoding: 'utf8', timeout: 3000 })
+
+  return read.status === 0 ? read.stdout : null
+}
+
 function clampSize(value: number, max: number): number {
   return Math.min(max, Math.max(MIN_SIZE, Math.floor(Number.isFinite(value) ? value : 80)))
 }
@@ -165,7 +195,8 @@ export class Terminals {
 
     const path = freshPath()
     const id = randomUUID().slice(0, 8)
-    const env = path === null ? { ...process.env, [TERM_ENV]: id } : { ...process.env, Path: path, PATH: path, [TERM_ENV]: id }
+    const locale = utf8Locale(process.env, process.platform, appleLocale)
+    const env = path === null ? { ...process.env, ...locale, [TERM_ENV]: id } : { ...process.env, Path: path, PATH: path, [TERM_ENV]: id }
     const shell = process.platform === 'win32' ? 'powershell.exe' : (process.env.SHELL ?? '/bin/bash')
     const args = process.platform === 'win32' ? ['-NoLogo'] : ['-l']
     const pty = this.#pty.spawn(shell, args, { name: 'xterm-256color', cols: clampSize(input.cols, MAX_COLS), rows: clampSize(input.rows, MAX_ROWS), cwd, env })

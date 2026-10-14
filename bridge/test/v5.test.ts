@@ -7,6 +7,7 @@ import { Gallery } from '../src/gallery.ts'
 import { arr, type JsonObject, objects, parseJsonObject, str } from '../src/json.ts'
 import { claimLaunchPrompt, type LaunchPrompt, pickTerminal } from '../src/launch.ts'
 import { type Bridge, startBridge } from '../src/server.ts'
+import { utf8Locale } from '../src/terminal.ts'
 import { parseHookInput, parseSlash, Store } from '../src/store.ts'
 import { Transcripts } from '../src/transcripts.ts'
 
@@ -105,6 +106,17 @@ test('on macOS a terminal is picked in order: WezTerm, Terminal', () => {
   assert.deepEqual(args.slice(-2), ['/Users/me/it\'s "here"', 'claude'])
   assert.ok(args.slice(0, -2).every(arg => !arg.includes('/Users/me')))
   assert.equal(terminal.args('/w', []).at(-1), '/w')
+})
+
+test('a terminal on macOS gets a UTF-8 locale when the bridge has none', () => {
+  // Opened from Finder: no LANG at all, so the shell would drop Hangul.
+  assert.deepEqual(utf8Locale({}, 'darwin', () => 'ko_Kore_KR\n'), { LANG: 'ko_KR.UTF-8' })
+  assert.deepEqual(utf8Locale({ LANG: 'C' }, 'darwin', () => 'en_US@rg=gbzzzz'), { LANG: 'en_US.UTF-8' })
+  assert.deepEqual(utf8Locale({}, 'darwin', () => null), { LANG: 'en_US.UTF-8' })
+  // A UTF-8 locale already there stays; Windows is left alone.
+  assert.deepEqual(utf8Locale({ LANG: 'ko_KR.UTF-8' }, 'darwin', () => 'en_US'), {})
+  assert.deepEqual(utf8Locale({ LC_CTYPE: 'UTF-8' }, 'darwin', () => 'en_US'), {})
+  assert.deepEqual(utf8Locale({}, 'win32', () => 'ko_KR'), {})
 })
 
 test('the first prompt goes to the session that opens in that folder afterwards', () => {

@@ -63,6 +63,27 @@ test('a prompt, a tool call and a stop move the session through its states', () 
   assert.equal(alerts[0]?.type, 'done')
 })
 
+test('a turn stopped without a Stop hook goes idle when the mod says it ended', () => {
+  const { store } = makeStore()
+
+  store.apply(hook('UserPromptSubmit', { prompt: '길게 써 줘' }))
+  store.apply(hook('PreToolUse', { tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'sleep 60' } }))
+  assert.equal(store.sessions.get('sess-1')?.status, 'working')
+
+  // Stopped: Claude Code sends no Stop hook, only the mod sees the turn end.
+  assert.ok(store.turnEnded('sess-1'))
+  assert.equal(store.sessions.get('sess-1')?.status, 'idle')
+  assert.equal(store.sessions.get('sess-1')?.steps.some(step => step.status === 'running'), false)
+
+  // A turn that finished: the Stop hook settles it, and the turn end that
+  // follows leaves "done" as it is.
+  store.apply(hook('UserPromptSubmit', { prompt: '다시' }))
+  store.apply(hook('Stop', { last_assistant_message: '끝' }))
+  assert.equal(store.turnEnded('sess-1'), null)
+  assert.equal(store.sessions.get('sess-1')?.status, 'done')
+  assert.equal(store.turnEnded('nobody'), null)
+})
+
 test('a session keeps the folder it started in while Claude cds around', () => {
   const { store } = makeStore()
 

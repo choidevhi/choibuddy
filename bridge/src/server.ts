@@ -983,6 +983,21 @@ export async function startBridge(options: BridgeOptions): Promise<Bridge> {
       return
     }
 
+    // The session's own turn ended; a stopped one has no Stop hook to say so.
+    if (path === '/mod/turn-end') {
+      const sessionId = str(parsed, 'sessionId') ?? ''
+      const result = store.turnEnded(sessionId)
+
+      if (result !== null) {
+        log(`turn ended without a Stop hook in ${sessionId}: idle`)
+        for (const id of result.cleared) finish(id, {})
+        scheduleSnapshot()
+      }
+      sendJson(res, 200, { ok: true })
+
+      return
+    }
+
     if (path === '/mod/steered') {
       const sessionId = str(parsed, 'sessionId') ?? ''
 

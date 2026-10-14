@@ -1,6 +1,6 @@
 {
   "name": "choibuddy",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "ChoiBuddy에 사용량(컨텍스트, 5시간·주간 한도, 토큰, 캐시)을 보내고, 위젯·휴대폰에서 보낸 프롬프트를 이 세션에 넣는다",
   "author": {
     "name": "choidevhi"
