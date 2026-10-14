@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- macOS only (Tauri merges this into the app's Info.plist). Speaking a
+       prompt uses the microphone and speech recognition; without these
+       lines macOS ends the app the moment the microphone is touched. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>ChoiBuddy listens while you speak a prompt.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>ChoiBuddy turns what you say into the prompt text.</string>
+</dict>
+</plist>

@@ -666,7 +666,8 @@ export class Store {
         session.subagents = session.agents.filter(item => item.status === 'running').length
         break
       }
-      // Codex: the person stopped the turn.
+      // The person stopped the turn: Codex says so, and for Claude Code the
+      // mod reports a turn that ended without a Stop hook (turnEnded).
       case 'Interrupt': {
         this.#settle(session)
         cleared = this.#clearPending(session.id, () => true)
@@ -1056,6 +1057,18 @@ export class Store {
     }
 
     return handed
+  }
+
+  // The mod saw the main loop's turn end. A turn that finished is settled by
+  // the Stop hook, which may come just before or after this; one that was
+  // stopped (Esc in the terminal, or Stop from a device) gets no Stop hook
+  // at all, so it would keep showing as thinking. It goes idle instead.
+  turnEnded(sessionId: string): ApplyResult | null {
+    const session = this.sessions.get(sessionId)
+
+    if (session === undefined || (session.status !== 'thinking' && session.status !== 'working' && session.status !== 'waiting')) return null
+
+    return this.apply({ event: 'Interrupt', sessionId, cwd: session.cwd, mode: session.mode, raw: { hook_event_name: 'Interrupt', session_id: sessionId } })
   }
 
   // The mod steered these in (joined into one prompt, so the prompt's text

@@ -119,6 +119,16 @@ fn set_always_on_top(window: Window, on: bool) -> Result<(), String> {
     window.set_always_on_top(on).map_err(|error| error.to_string())
 }
 
+/// Fills the screen's usable area with the widget, or puts it back. Tauri's
+/// own double-click toggle first asks for the window's zoom button, and a
+/// frameless window on macOS has none, so it never did anything there.
+#[tauri::command]
+fn toggle_zoom(window: Window) -> Result<(), String> {
+    let result = if window.is_maximized().map_err(|error| error.to_string())? { window.unmaximize() } else { window.maximize() };
+
+    result.map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn hide_window(window: Window) -> Result<(), String> {
     window.hide().map_err(|error| error.to_string())
@@ -261,6 +271,7 @@ pub fn run() {
             open_release_page,
             set_always_on_top,
             hide_window,
+            toggle_zoom,
             minimize_window,
             reveal_window,
             show_main,

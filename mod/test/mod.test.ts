@@ -259,6 +259,24 @@ test('읽기 전에 턴이 끝나면 그 말로 다음 턴을 시작한다', asy
   expect(submitted).toEqual(['이것도 해줘'])
 })
 
+test('멈춘 턴이 끝나면 브리지에 턴이 끝났다고 알린다 (Stop 훅이 오지 않으니까)', async ($, on) => {
+  const sent: Sent[] = []
+  const clock = mock.clock(on, { now: NOW })
+
+  engineBeneath(on, sent, [], [])
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: '길게 써 줘', turnId: 't5' })
+  await $.turn.complete({ answer: '', durationMs: 10, isAborted: true, turnId: 't5', reason: 'aborted' })
+  await clock.advance(10)
+
+  const ended = sent.filter(item => item.url.endsWith('/mod/turn-end'))
+
+  expect(ended.length).toBe(1)
+  expect(JSON.parse(ended[0]?.body ?? '{}')).toEqual({ sessionId: 'sess-1' })
+})
+
 test('멈추고 보내기는 돌고 있는 턴을 멈추고 바로 보낸다', async ($, on) => {
   const submitted: string[] = []
   const aborted: string[] = []

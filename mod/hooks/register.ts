@@ -11,7 +11,7 @@ const BRIDGE = 'http://127.0.0.1:47130'
 const POLL_MS = 500
 // Sent with every poll, so the bridge can tell a session that still runs an
 // older copy of this mod. Kept equal to .claude-plugin/plugin.json.
-const MOD_VERSION = '0.5.7'
+const MOD_VERSION = '0.5.8'
 // When this module was loaded: a /reload-plugins asked for before it is done
 // (the module that ran it never reports back).
 const LOADED_AT = Date.now()
@@ -379,6 +379,8 @@ export const register: Register = on => {
 
     if (e.agentId === undefined && e.turnId === (await runningTurn($))) {
       await setRunningTurn($, null)
+      // A stopped turn gets no Stop hook: the bridge learns here that it ended.
+      void $.session.id().then(sessionId => send($, '/mod/turn-end', JSON.stringify({ sessionId })), () => null)
       // A turn that ended before reaching a tool boundary: the messages start
       // the next one.
       if (steering.length > 0) await steerNow($, await $.session.id().catch(() => ''))

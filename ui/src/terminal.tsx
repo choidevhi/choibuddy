@@ -98,7 +98,9 @@ function TerminalView({ connection, term, dark, keys }: { connection: Connection
       if (data !== '') void termInput(connection, term.id, data)
     }
     const typed = xterm.onData(data => {
-      pending += data
+      // WebKit (macOS) types a space as U+00A0 while a Hangul input source is
+      // on; the shell would read it as part of the word, not as a space.
+      pending += data.replace(/\u00a0/g, ' ')
       if (inputTimer === 0) inputTimer = window.setTimeout(send, INPUT_MS)
     })
     const stream = new EventSource(termStreamUrl(connection, term.id))
